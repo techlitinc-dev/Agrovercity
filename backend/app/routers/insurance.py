@@ -263,6 +263,6 @@ async def appeal_claim(claim_id: str, body: AppealIn, user: dict = Depends(requi
             detail={"code": "TOO_MANY_PHOTOS", "message": "A claim can carry at most 5 photos", "fieldErrors": {"photos": "max 5"}},
         )
     claim["damagePhotos"] = merged
-    claim = claims_service.appeal(claim, body.reason)
+    claim = await claims_service.appeal(claim, body.reason, uid)
     await db.set_subdoc_at(_claims_path(uid), claim_id, claim)
     return claim

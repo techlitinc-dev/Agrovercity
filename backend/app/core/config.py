@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     weather_api_key: str = ""
     sentry_dsn: str = ""
     cron_secret: str = ""
+    msg91_auth_key: str = ""
+    sms_template_invite: str = "sms_template_invite"
+    sms_template_equipment_cancel_owner: str = "equipment_cancel_owner"
+    sms_template_equipment_reminder: str = "equipment_reminder"
 
 
 settings = Settings()

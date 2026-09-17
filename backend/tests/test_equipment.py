@@ -56,6 +56,7 @@ async def test_slots_generated_on_first_read(client, fake_firebase, fake_users, 
 async def test_book_fpo_auto_confirms(client, fake_firebase, fake_users, fake_db):
     _seed_equipment(fake_db)
     access = await _login(client, fake_users)
+    fake_db["users"]["uid-1"] = {"id": "uid-1", "agriCoins": 0}
     slot = await _get_slot(client, access, "eq-1")
 
     resp = await client.post(f"/v1/equipment/slots/{slot['id']}/book", json={"farmerName": "Ramesh"}, headers=_auth_header(access))
@@ -64,7 +65,7 @@ async def test_book_fpo_auto_confirms(client, fake_firebase, fake_users, fake_db
     assert body["status"] == "booked"
     assert body["booking"]["status"] == "booked"
     assert body["agriCoinsEarned"] == 50
-    assert fake_users["users"]["uid-1"]["agriCoins"] == 50
+    assert fake_db["users"]["uid-1"]["agriCoins"] == 50
     assert fake_db["equipment_slots"][slot["id"]]["bookedByName"] == "Ramesh"
 
 

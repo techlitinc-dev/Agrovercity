@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core import db
 from app.core.deps import require_roles
 from app.models.equipment import BookSlotRequest
+from app.services import coins as coins_service
 from app.services import equipment as equipment_service
-from app.services import users as users_service
+from app.services import sms as sms_service
 
 router = APIRouter(prefix="/equipment", tags=["equipment"])
 
@@ -71,13 +72,8 @@ async def book_slot(slot_id: str, body: BookSlotRequest, user: dict = Depends(re
     status = "booked" if equipment.get("ownerType") == "fpo" else "pending"
     booking = await equipment_service.create_booking_for_user(user["id"], body.farmerName, slot, equipment, status)
 
-    uid = user["id"]
-    user_doc = await users_service.get_user(uid)
-    if user_doc is not None:
-        user_doc["agriCoins"] = (user_doc.get("agriCoins") or 0) + equipment_service.BOOKING_COINS
-        await users_service.save_user(uid, user_doc)
-
-    return {"booking": booking, "status": status, "agriCoinsEarned": equipment_service.BOOKING_COINS}
+    coins_awarded = await coins_service.award_coins(user["id"], equipment_service.BOOKING_COINS, "equipment_booking", slot["id"])
+    return {"booking": booking, "status": status, "agriCoinsEarned": coins_awarded}
 
 
 @router.post("/slots/{slot_id}/waitlist")
@@ -124,6 +120,14 @@ async def cancel_booking(booking_id: str, user: dict = Depends(require_roles(*BO
         )
     booking["status"] = "cancelled"
     await db.set_doc("equipment_bookings", booking_id, booking)
+    owner = await db.get_doc("users", (await db.get_doc("equipment", booking["equipmentId"]) or {}).get("ownerId"))
+    owner_phone = (owner or {}).get("phone")
+    if owner_phone:
+        await sms_service.get_sms_sender().send(
+            owner_phone,
+            "equipment_cancel_owner",
+            {"equipment": (await db.get_doc("equipment", booking["equipmentId"]) or {}).get("name", ""), "date": booking["date"], "slot": booking["slotName"]},
+        )
     slot = await db.get_doc("equipment_slots", booking["slotId"])
     equipment = await db.get_doc("equipment", booking["equipmentId"])
     promoted_uid = None

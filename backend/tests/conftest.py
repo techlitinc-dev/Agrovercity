@@ -109,7 +109,7 @@ def fake_db(monkeypatch):
             if path.split("/")[-1] == collection_id:
                 parent_path = "/".join(path.split("/")[:-1])
                 for doc_id, doc in docs.items():
-                    rows.append({"doc": copy.deepcopy(doc), "path": parent_path})
+                    rows.append({"doc": copy.deepcopy(doc), "path": parent_path, "collection": collection_id, "doc_id": doc_id})
         return rows
 
     monkeypatch.setattr(db, "query", fake_query)

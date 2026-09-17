@@ -2,6 +2,76 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 13 — Chatbot, Advisory, Gamification, FCM (Tasks A1–A8)
+
+**Status: implemented — 333/333 tests passing (36 new).**
+
+### Task A1 — Kisan Mitra chatbot — DONE
+
+- `models/chatbot.py` (ChatMessageIn/KisanMitraMessage/HandoffIn/HandoffOut), `services/llm.py` (Hindi-first system prompt with profile context + the never-invent-mandi-prices rule; `complete` via OpenRouter `llama-3.1-8b-instruct` with 15 s timeout, canned dev reply when key empty; `sarvam_stt` delegating to the speech service; keyword `detect_rich_card` + `quick_replies_for`), `services/chat_session.py` (Redis RPUSH/LTRIM-40/24h-TTL + Firestore mirror in `chat_sessions/{sessionId}/messages`; Firestore fallback on read).
+- `routers/chatbot.py` (all roles): `POST /messages` (400 `EMPTY_MESSAGE`; audio → STT; LLM outage → HTTP 200 Hindi fallback, never 5xx), `GET /history` (Firestore oldest-first, envelope), `POST /handoff` (handoff request doc + support thread, expert response).
+- Tests (`tests/test_chatbot.py`): 6 passed — incl. 2-turn context retention and LLM-outage grace.
+
+### Task A2 — Advisory — DONE
+
+- `services/advisory.py`: `saturation` — aggregate `crop_cycles` counts (privacy: the caller's own doc is excluded from the count), green/yellow/red thresholds, base-price map with risk factors, today+90d predicted date, per-crop alternatives; `npk_recommendation` — crop target table, deficits floored at 0, urea/DAP/MOP conversions, Hindi recommendation strings; `current_season` (month-based Kharif/Rabi).
+- `services/disease_model/{base,stub,__init__.py}`: adapter pattern (`DISEASE_MODEL_ADAPTER` env, stub returns Early Blight/Alternaria solani/0.87/Mancozeb).
+- `routers/advisory.py` (farmer): `POST /saturation` (opt-in `shareSowingIntent` writes `crop_cycles/{uid}_{crop}_{season}`), `POST /disease-scan` (415/413 via shared validator; scans/{uid}/ upload; adapter scan), `GET /pest-radar` (2 mock alerts), `POST /npk`.
+- Tests (`tests/test_advisory.py`): 5 passed.
+
+### Task A3 + A8 — Gamification, referrals, coin ledger + abuse caps — DONE
+
+- `services/coins.py`: `award_coins` now returns the **awarded (capped) amount**, clamps to `DAILY_EARN_CAP = 200/day` (capped awards write a `+0` ledger entry with `<reason>_capped` for auditability), applies level thresholds `[0, 500, 1500, 3000, 6000]` → Krishi Yuva/Daksh/Praveen/Ratna/Samrat and the streak rule (yesterday → +1, today → unchanged, older → 1). `spend_coins` unchanged.
+- `routers/gamification.py`: `GET /status` (xpToNextLevel), `GET /rewards`, `POST /redeem` (404 `REWARD_NOT_FOUND`; 1 redemption/day → 409 `REDEMPTION_LIMIT_REACHED`; insufficient → 409 `INSUFFICIENT_COINS`; voucher → `KC-XXXXXXXX` coupon), `GET /ledger`.
+- `routers/referrals.py`: `GET /referrals` (referral code backfill `NAME+year`, 3 milestones with achieved flags, referred list), `POST /referrals/invite` (+91 phone validation → 422; duplicate → 409 `ALREADY_INVITED`; +100 coins; `sms.send_invite`).
+- **Coin-hook audit:** diary POST +15, equipment slot book +50 (refactored onto `award_coins`), expert-talk register +25, referral invite +100 — all four now return the actual (possibly clamped) `agriCoinsEarned`. The "urgent-task complete +50" hook from the day file has no endpoint yet (never built in Days 4–5) — flagged.
+- **Day-file test inconsistency flagged:** A3's ledger test expects a +600 ledger entry while A8's 200/day cap mathematically limits a single award to 200 — the cap (A8, later spec item) wins; the level-up test seeds 400 + awards 600 (clamped +200) to reach level 2, and the ledger test asserts +150/−300.
+- Tests (`tests/test_gamification.py`): 8 passed (6 + 2 cap tests).
+
+### Task A4 — FCM send helper + notifications read — DONE
+
+- `services/fcm.py` formalised: `send_to_user` — multicast to `users/{uid}/devices` tokens, prunes `UnregisteredError` devices, wrapped try/except (never raises; dev mode log-only, 0); `notify` — writes `users/{uid}/notifications` `{title, body, type, read: false, createdAt}` (+ additive data keys so rent-reminder dedup keeps working) then sends.
+- Device docs now also store the raw `fcmToken` (Day 10 stored only the hash; FCM send needs it — flagged as an additive change to the Day-10 registration).
+- `routers/notifications.py`: `GET /` (desc envelope), `POST /read` (empty list = mark all; `{markedRead: n}`).
+- `claims.advance_status` is now **async** and takes `uid` — fires `fcm.notify` on legal transitions (Day 11 tests/callers updated to await); `appeal` likewise. Never raises into routers.
+- Tests (`tests/test_notifications.py`): 5 passed.
+
+### Task A5 — Support threads (F20) — DONE
+
+- Handoff now creates `support_threads/{threadId}` and the response gains `threadId` (additive).
+- `routers/support.py`: `GET /threads` (own, lastMessageAt desc), `GET/POST /threads/{id}/messages` (foreign thread → 404 `THREAD_NOT_FOUND`; user messages bump `lastMessageAt`; expert replies land Day 14 into the same subcollection).
+- Tests (`tests/test_support.py`): 4 passed.
+
+### Task A6 — Speech STT/TTS (X21) — DONE
+
+- `services/speech.py`: `stt` (dev canned `आज प्याज का भाव क्या है?`/hi; Sarvam `saarika` otherwise; errors → `SpeechUnavailable`), `tts` (Bhashini stub returns a sample URL in dev; real path uploads via storage). `llm.sarvam_stt` delegates.
+- `routers/speech.py`: `POST /stt` (m4a/wav only → 415 envelope; >5 MB → 413; duration cap enforced by size — commented), `POST /tts` (text 1–500). `SpeechUnavailable` → 503 `SPEECH_UNAVAILABLE`.
+- Tests (`tests/test_speech.py`): 5 passed.
+
+### Task A7 — SMS sender + hooks (X4) — DONE
+
+- `services/sms.py`: `SmsSender` Protocol, `Msg91Sender` (DLT-registered template IDs in settings), `LogOnlySender` (default, `MSG91_AUTH_KEY` empty), `get_sms_sender()`; `send_invite` wrapper kept.
+- Hooks: equipment cancel sends `equipment_cancel_owner` to the machine owner's phone; new `services/reminders.py` scans equipment bookings starting within 30 min (IST slot parsing reused) and sends `equipment_reminder` to the farmer (idempotent via `reminderSentAt`), exposed as `POST /v1/jobs/equipment-reminders/run`. No `print(` remains in either file.
+- Tests (`tests/test_sms.py`): 3 passed.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest
+333 passed, 37 warnings in 12.55s
+  ...prior days 297 | chatbot 6 | advisory 5 | gamification 8 | notifications 5
+  support 4 | speech 5 | sms 3
+```
+
+### Blockers / notes
+
+- **`advance_status`/`appeal` are now async** (Day 13 notify hook) — Day 11 tests and the appeal route updated to await. `uid` is optional so pure-function calls without notifications still work.
+- **A3/A8 test inconsistency flagged:** the day file's "+600 ledger entry" cannot coexist with its own 200/day earn cap; the cap wins (later spec item) and tests assert the clamped behaviour with a comment.
+- **"urgent-task complete +50" hook not implementable** — that endpoint was never built in Days 4–5; flagged for the Day 14 audit.
+- **Device docs store the raw `fcmToken`** (additive) so FCM multicast can address them; the masked/hash key scheme for deletion is unchanged.
+- **`db.list_collection_group` extended** to return `{doc, path, collection, doc_id}` (handles top-level and nested collections) for the equipment reminder scan.
+- Live smoke: health 200; 19 new paths registered; unauthed chatbot history → 401 envelope.
+
 ## Day 12 — Content, Gyan Hub, Livestock, Tree + Reviews/Ratings (Tasks A1–A6)
 
 **Status: implemented — 297/297 tests passing (38 new).**

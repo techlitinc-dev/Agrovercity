@@ -72,9 +72,17 @@ async def list_subdocs(path: str) -> list[dict]:
 
 
 async def list_collection_group(collection_id: str) -> list[dict]:
-    """Returns [{doc, path}] where path is the parent document path (e.g. users/<uid>)."""
+    """Returns [{doc, path, collection, doc_id}] where path is the parent document
+    path ("" for top-level collections) and collection is the collection name."""
     docs = await get_db().collection_group(collection_id).get()
-    return [{"doc": d.to_dict(), "path": d.reference.parent.parent.path} for d in docs]
+    rows = []
+    for d in docs:
+        parent = d.reference.parent
+        if parent.parent is not None:
+            rows.append({"doc": d.to_dict(), "path": parent.parent.path, "collection": collection_id, "doc_id": d.id})
+        else:
+            rows.append({"doc": d.to_dict(), "path": "", "collection": collection_id, "doc_id": d.id})
+    return rows
 
 
 async def query(

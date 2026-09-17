@@ -12,7 +12,9 @@ from app.routers import (
     addresses,
     app_config,
     auth,
+    advisory,
     bank_accounts,
+    chatbot,
     contracts,
     content,
     diary,
@@ -20,6 +22,8 @@ from app.routers import (
     equipment_owner,
     finance,
     fpo,
+    gamification,
+    gyan,
     health,
     insurance,
     jobs,
@@ -30,15 +34,18 @@ from app.routers import (
     lots,
     mandi,
     marketplace,
+    notifications,
     orders,
     pnl,
-    gyan,
     ratings,
+    referrals,
     reference,
     schemes,
     seller,
     settlements,
     soil_tests,
+    speech,
+    support,
     transport,
     tree,
     users,
@@ -94,6 +101,13 @@ app.include_router(gyan.router, prefix="/v1")
 app.include_router(livestock.router, prefix="/v1")
 app.include_router(tree.router, prefix="/v1")
 app.include_router(ratings.router, prefix="/v1")
+app.include_router(chatbot.router, prefix="/v1")
+app.include_router(advisory.router, prefix="/v1")
+app.include_router(gamification.router, prefix="/v1")
+app.include_router(referrals.router, prefix="/v1")
+app.include_router(notifications.router, prefix="/v1")
+app.include_router(support.router, prefix="/v1")
+app.include_router(speech.router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)
@@ -121,6 +135,7 @@ async def startup():
     init_firebase()
     try:
         from app.data.gyan_seed import seed_gyan
+        from app.data.rewards_seed import seed_rewards
         from app.data.insurance_seed import seed_insurance_rates
         from app.data.livestock_seed import seed_livestock
         from app.data.schemes_seed import seed_schemes
@@ -133,6 +148,7 @@ async def startup():
         await seed_gyan()
         await seed_livestock()
         await seed_tree()
+        await seed_rewards()
     except Exception:
         logging.getLogger(__name__).warning("Scheme seeding skipped (Firestore unavailable)")
 

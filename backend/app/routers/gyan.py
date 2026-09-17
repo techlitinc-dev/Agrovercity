@@ -103,8 +103,8 @@ async def register_talk(talk_id: str, uid: str = Depends(current_user_id)):
     await db.set_subdoc_at(reg_path, talk_id, {"id": talk_id, "registeredAt": _now_iso()})
     talk["registeredCount"] = talk.get("registeredCount", 0) + 1
     await db.set_doc("expert_talks", talk_id, talk)
-    new_balance = await coins_service.award_coins(uid, 25, "expert_talk", talk_id)
-    return {"registered": True, "agriCoinsEarned": 25, "agriCoins": new_balance}
+    coins_awarded = await coins_service.award_coins(uid, 25, "expert_talk", talk_id)
+    return {"registered": True, "agriCoinsEarned": coins_awarded}
 
 
 @router.post("/expert-talks/{talk_id}/questions", status_code=201)

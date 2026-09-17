@@ -2,6 +2,7 @@ import zlib
 from datetime import date, datetime, timedelta, timezone
 
 from app.core import db
+from app.services import fcm as fcm_service
 
 CLAIM_TRANSITIONS = {
     "intimated": ["surveyorAssigned"],
@@ -37,7 +38,7 @@ SURVEYOR_POOL = [
 ]
 
 
-def advance_status(claim: dict, new_status: str, note: str = "") -> dict:
+async def advance_status(claim: dict, new_status: str, note: str = "", uid: str | None = None) -> dict:
     if new_status not in CLAIM_TRANSITIONS.get(claim.get("status"), []):
         raise ValueError(f"Illegal transition from {claim.get('status')} to {new_status}")
     claim["status"] = new_status
@@ -45,6 +46,13 @@ def advance_status(claim: dict, new_status: str, note: str = "") -> dict:
     claim.setdefault("timeline", []).append(
         {"status": new_status, "at": datetime.now(timezone.utc).isoformat(), "note": note}
     )
+    if uid:
+        await fcm_service.notify(
+            uid,
+            f"दावा अपडेट: {claim.get('claimNumber', '')}",
+            STATUS_TEXT[new_status],
+            {"type": "claim", "claimId": claim.get("id", "")},
+        )
     return claim
 
 
@@ -70,7 +78,7 @@ def auto_assign_surveyor(district: str) -> dict:
     }
 
 
-def appeal(claim: dict, reason: str) -> dict:
+async def appeal(claim: dict, reason: str, uid: str | None = None) -> dict:
     if claim.get("status") != "rejected":
         raise ValueError(f"Cannot appeal a claim in status {claim.get('status')}")
     claim["status"] = "intimated"
@@ -83,4 +91,11 @@ def appeal(claim: dict, reason: str) -> dict:
             "note": f"Appeal submitted: {reason[:100]}",
         }
     )
+    if uid:
+        await fcm_service.notify(
+            uid,
+            f"दावा अपडेट: {claim.get('claimNumber', '')}",
+            STATUS_TEXT["intimated"],
+            {"type": "claim", "claimId": claim.get("id", "")},
+        )
     return claim

@@ -64,8 +64,8 @@ async def create_entry(body: DiaryEntryIn, uid: str = Depends(current_user_id)):
     entry_id = uuid4().hex
     doc = {"id": entry_id, **body.model_dump()}
     await db.set_subdoc_at(_entries_path(uid), entry_id, doc)
-    new_balance = await coins_service.award_coins(uid, 15, "diary_entry", entry_id)
-    return DiaryEntryCreated(entry={"id": entry_id, **body.model_dump()}, agriCoinsEarned=15)
+    coins_awarded = await coins_service.award_coins(uid, 15, "diary_entry", entry_id)
+    return DiaryEntryCreated(entry={"id": entry_id, **body.model_dump()}, agriCoinsEarned=coins_awarded)
 
 
 @router.delete("/entries/{entry_id}", status_code=204)

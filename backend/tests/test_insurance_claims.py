@@ -101,7 +101,7 @@ async def test_state_machine_legal():
         "statusText": STATUS_TEXT["intimated"],
         "timeline": [{"status": "intimated", "at": "2026-09-17T00:00:00Z", "note": "Claim intimated within 72h window"}],
     }
-    updated = advance_status(claim, "surveyorAssigned")
+    updated = await advance_status(claim, "surveyorAssigned")
     assert updated["status"] == "surveyorAssigned"
     assert updated["statusText"] == STATUS_TEXT["surveyorAssigned"]
     assert len(updated["timeline"]) == 2
@@ -110,7 +110,7 @@ async def test_state_machine_legal():
 async def test_state_machine_illegal():
     claim = {"status": "intimated", "statusText": "", "timeline": []}
     with pytest.raises(ValueError):
-        advance_status(claim, "dbtApproved")
+        await advance_status(claim, "dbtApproved")
 
 
 async def test_claim_list_and_detail(client, fake_firebase, fake_users, fake_db, fake_storage):
@@ -187,9 +187,9 @@ async def test_appeal_rejected_claim_returns_to_intimated(client, fake_firebase,
     from app.services.claims import advance_status
 
     stored = fake_db["users/uid-1/insurance_claims"][claim_id]
-    advance_status(stored, "surveyorAssigned")
-    advance_status(stored, "fieldAssessed")
-    advance_status(stored, "rejected", "Insufficient evidence")
+    await advance_status(stored, "surveyorAssigned")
+    await advance_status(stored, "fieldAssessed")
+    await advance_status(stored, "rejected", "Insufficient evidence")
     timeline_before = len(stored["timeline"])
 
     resp = await client.post(
