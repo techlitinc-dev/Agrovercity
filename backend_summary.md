@@ -2,6 +2,57 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 8 — Equipment + FPO (Tasks A1–A4)
+
+**Status: implemented — 147/147 tests passing (24 new).**
+
+### File split (reported per conventions §1.4)
+
+The day file puts everything in `routers/equipment.py`, which would exceed the 300-line limit. Split into: `app/services/equipment.py` (slot generation, booking creation, waitlist promotion, IST/2h-window helpers, `DEFAULT_SLOTS`), `app/routers/equipment.py` (farmer-facing: list, slots, book, waitlist, cancel), `app/routers/equipment_owner.py` (owner CRUD, fleet, pending inbox, approve/reject), and `app/routers/fpo.py`.
+
+### Task A1 — Equipment slots + booking rules + waitlist + cancel — DONE
+
+- Slots live in `equipment_slots/{equipmentId}_{date}_{slotIndex}`; first GET for a date generates 4 slots from the equipment's `slotTemplate` or `DEFAULT_SLOTS` (exact prototype names/tasks), ordered by parsed start time; date defaults to today IST.
+- `POST /equipment/slots/{slotId}/book` (farmer): `SLOT_UNAVAILABLE` 409 unless available; max-2/day rule (same-date bookings in `booked|pending`) → 409 `MAX_SLOTS_PER_DAY` with the Hindi message; FPO machines auto-confirm (`booked`), private → `pending`; +50 `agriCoins` on booking.
+- `POST /equipment/slots/{slotId}/waitlist`: doc `equipment_waitlists/{slotId}_{uid}`; duplicate → 409 `ALREADY_WAITLISTED`.
+- `DELETE /equipment/bookings/{bookingId}`: owner 403 `NOT_BOOKING_OWNER`; already-cancelled 409 `ILLEGAL_TRANSITION`; ≤2h rule parses the slot start (IST) → 409 `CANCEL_WINDOW_CLOSED`; on success the slot frees and the earliest waitlist entry is promoted with the correct status per `ownerType` (`promotedUserId` returned).
+- Tests (`tests/test_equipment.py`): 7 passed.
+
+### Task A2 — Owner CRUD + fleet + FPO — DONE
+
+- Owner endpoints (role equipmentRental): `POST /equipment` (forces `ownerType: "private"`, `distanceKm: 0`, `docStatus: "pending"`), `PUT /equipment/{id}` (owner-only 403 `NOT_EQUIPMENT_OWNER`; slotTemplate validated 1–8 entries × 4 keys → 422), `GET /equipment/owner/fleet` (bookedHoursThisWeek = booked|pending slots in the ISO week × 4, weeklyIncome, status, docStatus).
+- `scripts/seed_fpo.py`: `fpos/sahyadri-fpo` + `fpo_pools/pool-1` (380/500, 18%, deadline +10d).
+- `backend/app/routers/fpo.py` (farmer): `GET /me` (single-FPO dev mode), `GET /pools`, `POST /pools/{id}/join` (units ≥ 1 else 422; over-target → 409 `POOL_FULL`; member subdoc `fpo_pools/{id}/members/{uid}`), `GET /machinery?week=` (ISO week `YYYY-Www`, default current; 7 days of generated slots for verified FPO machines).
+- Tests: `test_equipment_owner.py` 6 passed, `test_fpo.py` 4 passed.
+
+### Task A3 — Approve/reject + waitlist promotion — DONE
+
+- `GET /equipment/bookings/pending`: owner's machines' pending bookings joined with machine name + slot fields.
+- `POST /equipment/bookings/{id}/approve` / `reject`: ownership 403 `NOT_EQUIPMENT_OWNER`, pending-only 409 `ILLEGAL_TRANSITION`; approve → booking+slot `booked` + FCM to farmer; reject (reason ≥ 3 chars → 422 envelope) → booking `rejected` + `rejectionReason`, slot freed, waitlist head promoted (new booking with correct status, waitlist doc removed), FCM to both the rejected and the promoted farmer.
+- Tests (`tests/test_equipment_approve.py`): 7 passed.
+
+### Task A4 — Machine document verification (KYC) — DONE
+
+- Equipment docs carry `docStatus: pending|verified|rejected` + `rejectionReason`; `EquipmentUpsertRequest` gains optional `rcDocUrl`/`insuranceDocUrl` (mirroring Day 7 vehicles). Admin queue is Day 14 — commented.
+- Seeded machines are `verified`; `GET /equipment` returns only verified machines; slots for non-verified → 404 `EQUIPMENT_NOT_FOUND` (no existence leak); owner fleet rows always include `docStatus`.
+- Tests: 3 added — pending hidden from list + slots 404, verified visible + slots generate, fleet docStatus.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest -v
+147 passed, 2 warnings in 8.66s
+  ...prior days 123 | equipment 7 | equipment_owner 6 | fpo 4 | equipment_approve 7
+```
+
+### Blockers / notes
+
+- **Seed scripts blocked on Firestore credentials** (same as prior days); data verified via tests importing the seed constants.
+- **New codes flagged:** `NOT_BOOKING_OWNER`, `BOOKING_NOT_FOUND` (equipment), `SLOT_NOT_FOUND` avoided in favour of `SLOT_UNAVAILABLE`/`EQUIPMENT_NOT_FOUND` where the day file named them; `POOL_NOT_FOUND` added for the join path.
+- Waitlist promotion does **not** award coins (only direct bookings earn the +50 per the day file).
+- Cancel-window determinism: the ≤2h test pins a `12:00 AM` slot start on today's date so the window is always closed regardless of run time.
+- Live smoke: health 200; all 14 new routes registered; unauthed `/v1/equipment` → 401.
+
 ## Day 7 — Contracts + Transport (Tasks A1–A6)
 
 **Status: implemented — 123/123 tests passing (27 new).**

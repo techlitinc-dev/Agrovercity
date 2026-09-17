@@ -12,6 +12,9 @@ from app.routers import (
     app_config,
     auth,
     contracts,
+    equipment,
+    equipment_owner,
+    fpo,
     health,
     lots,
     mandi,
@@ -47,6 +50,9 @@ app.include_router(orders.router, prefix="/v1")
 app.include_router(addresses.router, prefix="/v1")
 app.include_router(contracts.router, prefix="/v1")
 app.include_router(transport.router, prefix="/v1")
+app.include_router(equipment.router, prefix="/v1")
+app.include_router(equipment_owner.router, prefix="/v1")
+app.include_router(fpo.router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)
