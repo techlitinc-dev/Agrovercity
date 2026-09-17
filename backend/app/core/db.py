@@ -30,6 +30,17 @@ async def delete_doc(collection: str, doc_id: str):
     await get_db().collection(collection).document(doc_id).delete()
 
 
+async def set_subdoc(collection: str, doc_id: str, subcollection: str, subdoc_id: str, data: dict):
+    await (
+        get_db()
+        .collection(collection)
+        .document(doc_id)
+        .collection(subcollection)
+        .document(subdoc_id)
+        .set(data)
+    )
+
+
 async def query(
     collection: str,
     filters: list[tuple[str, str, Any]],

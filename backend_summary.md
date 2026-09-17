@@ -2,6 +2,60 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 7 — Contracts + Transport (Tasks A1–A6)
+
+**Status: implemented — 123/123 tests passing (27 new).**
+
+### Task A1 — Contracts: list/detail + accept (e-sign) — DONE
+
+- `backend/app/models/contracts.py`: `ContractOut`, `AcceptContractRequest` (signatureData base64 PNG, consentTimestamp, mpin).
+- `scripts/seed_contracts.py`: 3 open contracts with `termsText` (Hindi + English). **Deviation:** `flutter-prototype/` is absent, so the exact `dummyBuyerContracts` values could not be copied — realistic stand-ins consistent with the model are used; flagged for diff if the prototype appears.
+- `backend/app/routers/contracts.py`: `GET /contracts?status=` (envelope; roles farmer/seller/broker), `GET /contracts/{id}` (+termsText, 404 `CONTRACT_NOT_FOUND`), `POST /contracts/{id}/accept` (farmer/seller): `MPIN_NOT_SET` 409 → `WRONG_MPIN` 401 → `CONTRACT_NOT_OPEN` 409 → stores acceptance subdoc `contracts/{id}/acceptances/{uid}` via the new `db.set_subdoc` helper and flips the contract to `accepted` with `acceptedBy`.
+- Tests (`tests/test_contracts.py`): 6 passed.
+
+### Task A2 — Transport: vehicles, fare, bookings state machine, owner endpoints — DONE
+
+- `backend/app/models/transport.py`: vehicle/fare/booking/update/owner models (+ accept/reject/availability/POD extensions from A3–A6).
+- `backend/app/routers/transport.py`: `GET /vehicles` (3 type constants), `POST /fare-estimate` (unknown type → 422 `UNKNOWN_VEHICLE_TYPE`), `POST /bookings` (farmer/seller; fare = base + perKm×km; `status: "requested"`), `GET /bookings` (transport dispatch view: `requested` OR vehicleId in owner's vehicles; envelope), `PATCH /bookings/{id}` with the transition map (`requested→accepted|cancelled`, `accepted→enRoute|cancelled`, `enRoute→delivered`; illegal → 409 `ILLEGAL_TRANSITION`), owner vehicle CRUD (`POST /vehicles`, `GET /vehicles/my`, `PUT`/`DELETE /vehicles/{id}` with 403 `NOT_VEHICLE_OWNER`, DELETE soft via `active: false`), `GET /vehicles/{id}/calendar` (accepted/enRoute bookings), `PUT /vehicles/{id}/availability`.
+- Tests (`tests/test_transport.py`): 16 passed (6 core + 4 KYC + 3 POD + 3 lot-linkage).
+
+### Task A3 — Booking accept/reject with reason + notifications — DONE
+
+- `backend/app/services/notifications.py`: `send_fcm_to_user` — topic `user_{uid}` FCM when the admin SDK is initialised (token-based FCM is Day 13), and ALWAYS an in-app `notifications` doc so the inbox works without FCM.
+- `POST /bookings/{id}/accept` (requested only else 409): optional vehicle assignment (owner 403 / verification 422 checks per A4), stores vehicleId/vehicleNo, notifies the farmer (`booking_accepted`). `POST /bookings/{id}/reject`: reason ≥ 3 chars (422 `VALIDATION_ERROR` envelope), sets `cancellationReason` + `cancelledBy: "transporter"`, notifies with the reason in the body. `PATCH` kept for existing clients (commented that accept/reject are canonical).
+- Tests (`tests/test_booking_accept.py`): 5 passed.
+
+### Task A4 — Vehicle document verification (KYC) — DONE
+
+- Vehicle docs carry `docStatus: pending|verified|rejected` (+ `rejectionReason`); created as `pending` (admin verify/reject queue is Day 14 A1 — commented). `GET /vehicles/my?verifiedOnly=true` filters. Assignment (POST accept and PATCH accepted with vehicleId) requires `docStatus == "verified"` → 422 `VEHICLE_NOT_VERIFIED`; wrong owner → 403 `NOT_VEHICLE_OWNER`.
+- Tests: 4 added — pending on create, unverified accept 422, verified accept ok, verifiedOnly filter.
+
+### Task A5 — Proof of delivery required to mark delivered — DONE
+
+- `UpdateBookingRequest` gains `podPhotos`/`receiverName`; `enRoute → delivered` without ≥1 photo and a non-blank receiver name → 422 `POD_REQUIRED` with fieldErrors naming each missing field. Success stores `pod: {photos, receiverName, deliveredAt}` on the booking, visible in the dispatch list/detail.
+- Tests: 3 added — missing POD 422 (both fieldErrors), delivered with POD, POD visible on GET.
+
+### Task A6 — Lot-linked pickups — DONE
+
+- `CreateBookingRequest.lotId` optional: lot must exist and be owned by the booker (404 `LOT_NOT_FOUND`) and `status: "open"` (409 `LOT_NOT_OPEN`); stored on the booking. The transporter dispatch list includes a nested `lot` summary `{crop, quantityQuintals, expectedRate}` (missing lot doc → `lot: null`).
+- Tests: 3 added — own open lot stored + summary in dispatch, other farmer's lot 404, sold lot 409.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest -v
+123 passed, 2 warnings in 8.52s
+  ...prior days 96 | contracts 6 | transport 16 | booking_accept 5
+```
+
+### Blockers / notes
+
+- **Seed script blocked on Firestore credentials** (same as prior days); contract data verified via tests importing the seed constants.
+- **`set_subdoc` added to `core/db.py`** for the contract-acceptance subcollection (mirrors the Day-3 `role_profiles` approach; testable via the fake-db fixture).
+- **`BOOKING_NOT_FOUND` (404)** is a new code for missing bookings — not in the conventions named list, flagged.
+- **Contract seed values are stand-ins** (prototype absent) — see Task A1 note.
+- Live smoke: health 200; all 13 new routes registered (contracts + transport incl. accept/reject, calendar, availability); unauthed `/v1/contracts` → 401.
+
 ## Day 6 — Marketplace + payments (Tasks A1–A4)
 
 **Status: implemented — 96/96 tests passing (25 new).**

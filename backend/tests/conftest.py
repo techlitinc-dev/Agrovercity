@@ -79,8 +79,12 @@ def fake_db(monkeypatch):
     async def fake_delete_doc(collection, doc_id):
         store.get(collection, {}).pop(doc_id, None)
 
+    async def fake_set_subdoc(collection, doc_id, subcollection, subdoc_id, data):
+        store.setdefault(f"{collection}/{doc_id}/{subcollection}", {})[subdoc_id] = copy.deepcopy(data)
+
     monkeypatch.setattr(db, "query", fake_query)
     monkeypatch.setattr(db, "get_doc", fake_get_doc)
     monkeypatch.setattr(db, "set_doc", fake_set_doc)
     monkeypatch.setattr(db, "delete_doc", fake_delete_doc)
+    monkeypatch.setattr(db, "set_subdoc", fake_set_subdoc)
     return store

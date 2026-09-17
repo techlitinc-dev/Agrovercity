@@ -11,6 +11,7 @@ from app.routers import (
     addresses,
     app_config,
     auth,
+    contracts,
     health,
     lots,
     mandi,
@@ -18,6 +19,7 @@ from app.routers import (
     orders,
     reference,
     seller,
+    transport,
     users,
     weather,
 )
@@ -43,6 +45,8 @@ app.include_router(lots.router, prefix="/v1")
 app.include_router(marketplace.router, prefix="/v1")
 app.include_router(orders.router, prefix="/v1")
 app.include_router(addresses.router, prefix="/v1")
+app.include_router(contracts.router, prefix="/v1")
+app.include_router(transport.router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)
