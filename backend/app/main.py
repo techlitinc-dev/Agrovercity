@@ -7,7 +7,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from app.core.config import settings
 from app.core.firebase import init_firebase
-from app.routers import app_config, auth, health, users
+from app.routers import app_config, auth, health, reference, users, weather
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -22,6 +22,8 @@ app.include_router(health.router, prefix="/v1")
 app.include_router(app_config.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
 app.include_router(users.router, prefix="/v1")
+app.include_router(reference.router, prefix="/v1")
+app.include_router(weather.router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)

@@ -2,6 +2,41 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 4 — Reference data + weather (Tasks A1–A2)
+
+**Status: implemented — 47/47 tests passing (9 new).**
+
+### Task A1 — /v1/geo/reverse, /v1/regions/crops, /v1/languages — DONE
+
+- `backend/app/services/geo.py`: `GeoAdapter` Protocol + `MockGeoAdapter` (bounding boxes for Nashik → West/`["mr","hi"]` and Ludhiana → North/`["pa","hi"]`; fallback Maharashtra/Unknown/`["hi","en"]`); module-level `adapter` for later swap-in.
+- `backend/app/data/district_crops.py`: the 8-district kharif/rabi/suggested mapping exactly per the day file.
+- `backend/app/data/languages.py`: 7 languages (hi/mr/gu/pa/te/ta/en) with vernacular names, regions, and per-language greeting `audioText`; `REGIONAL_MAPPING` for North/Central/West/East/NorthEast/South.
+- `backend/app/routers/reference.py` (public): `GET /geo/reverse?lat=&lng=`, `GET /regions/crops?district=` (case-insensitive; unknown district → 200 with empty lists, not 404), `GET /languages` (`{languages, regionalMapping}`).
+- Live curl verified: Nashik geo → `{"district":"Nashik","suggestedLanguages":["mr","hi"]}`; crops suggested `[Tomato, Onion, Grape]`; unknown district → empty lists; languages → 7 entries.
+- Tests (`tests/test_reference.py`): 6 passed (day file asked for 5 — added Ludhiana box check).
+
+### Task A2 — GET /v1/weather (Redis-cached proxy) — DONE
+
+- `backend/app/services/weather.py`: `fetch_weather` — dev fixture when `weather_api_key` empty; otherwise OpenWeather `/data/2.5/weather` via `httpx.AsyncClient`, mapped to the same shape (`radarAvailable: false` for real API today, empty forecast — 5-day optional).
+- `backend/app/routers/weather.py`: `GET /weather?lat=&lng=` (auth required via `current_user_id`); cache key `weather:{round(lat,1)}:{round(lng,1)}`, TTL 1800 s; hit → cached JSON, miss → fetch + `cache_set`.
+- Tests (`tests/test_weather.py`): 3 passed — shape, cache counter (1 fetch for two same-coord calls, 2 after a different lat) with an in-memory `cache_get/cache_set` patch per the day-file instruction (never needs Redis), and 401 without auth.
+- Live: `/weather` without auth → 401 envelope (authed path covered by tests; OpenWeather key absent → fixture shape).
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest -v
+47 passed, 2 warnings in 5.71s
+  app_config 4 | auth 5 | infra 3 | mpin 5 | users 6 | profiles 6
+  referral 4 | role_profiles 5 | reference 6 | weather 3
+```
+
+### Notes
+
+- **Test-isolation fix:** `test_weather_shape` originally hit the real Redis client left over from the Day-1 infra test (event-loop-closed error in the full run). Per the day-file guidance, all weather tests now use the in-memory cache patch — the suite never needs Redis.
+- `rainProbability` maps to OpenWeather's `clouds.all` (closest field on the current-weather endpoint) — flagged in case a forecast endpoint later provides a real precipitation probability.
+- Language `regions` assignments beyond the day-file example (hi) are sensible defaults (mr/gu → West, pa → North, te/ta → South, en → none); adjust if the operator has a different mapping.
+
 ## Day 3 — Profile API (Tasks A1–A4)
 
 **Status: implemented — 38/38 tests passing (21 new).**
