@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.core.config import settings
 from app.models.settlements import SettlementRunIn
+from app.services.rent_reminders import run_rent_reminders
 from app.services.settlements import last_iso_week, run_settlements
 
 logger = logging.getLogger(__name__)
@@ -38,3 +39,9 @@ async def run_settlements_job(
         period_end = body.periodEnd or period_end
     summary = await run_settlements(period_start, period_end)
     return {**summary, "periodStart": period_start, "periodEnd": period_end}
+
+
+@router.post("/rent-reminders/run")
+async def run_rent_reminders_job(x_cron_secret: str | None = Header(default=None)):
+    _check_cron_secret(x_cron_secret)
+    return await run_rent_reminders()

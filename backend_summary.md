@@ -2,6 +2,75 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 10 — Schemes, Vault, Land Records, Water + Account (Tasks A1–A8)
+
+**Status: implemented — 230/230 tests passing (41 new).**
+
+### Task A1 — Schemes + eligibility engine — DONE
+
+- `models/schemes.py` (GovtScheme/SchemeApplyIn/SchemeApplyOut/PortalEntry), `data/schemes_seed.py` — 6 schemes (PM-KISAN ₹6,000/वर्ष, PMFBY, Soil Health Card, PM-KUSUM, eNAM, PMKSY drip) with Hindi descriptions and data-driven `eligibilityRules` maps; `seed_schemes()` is idempotent and called from startup (wrapped in try/except so missing Firestore credentials don't block boot).
+- `services/eligibility.py`: `is_eligible(user, rules)` — maxLandAcres/states/requiresKcc; unknown rules ignored; empty rules → eligible.
+- `routers/schemes.py` (farmer/farmLandlord): `GET /schemes?category=&eligibleOnly=` (per-user eligible computed, rules stripped, envelope), `POST /{id}/apply` (404 `SCHEME_NOT_FOUND`, 409 `ALREADY_APPLIED`, 403 `NOT_ELIGIBLE`, 400 `INVALID_DOCUMENT_ID` against `users/{uid}/vault_documents`; applicationId = schemeId), `GET /schemes/portals` (5 https portals).
+- Tests (`tests/test_schemes.py`): 6 passed.
+
+### Task A2 — Document vault (Storage signed URLs) — DONE
+
+- `services/storage.py`: `upload_user_file` (blob `vault/{uid}/{uuid}_{filename}`; dev mode writes `backend/.local_uploads/` with warning), `signed_download_url` (60-min; dev `file://`), `delete_blob`. Module docstring covers the AES-256/GMEK badge and the never-log rule.
+- `routers/vault.py` (all roles): `POST /documents` (multipart; 415 `UNSUPPORTED_FILE_TYPE` outside JPEG/PNG/PDF; 413 `FILE_TOO_LARGE` over 5 MB; no Aadhaar number field anywhere), `GET /documents` (fresh signed URL per doc, envelope), `DELETE /documents/{id}` (404 `DOCUMENT_NOT_FOUND`; blob + doc removed; 204). Router has zero logger calls (nothing to leak) — covered by the logger-spy test.
+- Tests (`tests/test_vault.py`): 5 passed.
+
+### Task A3 — Land-records search behind a swappable adapter — DONE
+
+- `services/land_records/{base,mock_adapter,__init__.py}`: ABC (`search`/`get_by_id`/`get_pdf_url`), 3 mock records (rec-1 Ozarkhed with exact day-file values), registry via `LAND_RECORDS_ADAPTER` env (unknown → raise).
+- `routers/land_records.py` (farmer/farmLandlord): `GET /search` (gatNumber regex/village min-3 → 422 envelope; neither → 400 `MISSING_SEARCH_PARAM`; type 712|8A), `GET /{id}/pdf` (404 `RECORD_NOT_FOUND`), `POST /{id}/import` (updates `landAreaAcres` + appends to the user's `landRecords` array).
+- Tests (`tests/test_land_records.py`): 6 passed.
+
+### Task A4 — Water intelligence — DONE
+
+- `routers/water.py` (farmer): `GET /schedule` (deterministic moisture via `zlib.crc32(uid+crop)`, 90/30-minute recommendation, user's irrigation method), `GET /groundwater?district=` (400 `MISSING_DISTRICT`; CGWB-style map incl. Nagpur critical; `measuredAt` today), `GET /canal-rotation?canal=` (Gangapur next-Monday 06:00-12:00, Palkhed next-Thursday 12:00-18:00, contains-filter), `POST /pmksy-calculator` (2 acres → ₹1,70,000 / 55% / ₹93,500 / ₹76,500).
+- Tests (`tests/test_water.py`): 5 passed.
+
+### Task A5 — Account deletion + FCM devices — DONE
+
+- `services/purge.py`: `purge_user(uid)` deletes all known user subcollections (incl. lease payment subdocs), anonymizes financial docs (`transport_bookings`/`orders` → `userId: "deleted:<uid[:8]>"`), deletes the user doc, calls `firebase_admin.auth.delete_user` (sync); Storage prefixes skipped in dev.
+- `routers/users.py`: `DELETE /users/me` — MPIN gate (409 `MPIN_NOT_SET`, 401 `WRONG_MPIN`), Redis rate limit `del_attempts:{uid}` INCR+EXPIRE 3600 → 429 `TOO_MANY_ATTEMPTS` after 3; `POST /v1/devices` (sha256 token-hash doc id, idempotent upsert) and `DELETE /v1/devices/{tokenHash}` (idempotent 204) exposed on a top-level `devices_router` so the path is `/v1/devices` per the day file.
+- Tests (`tests/test_account.py`): 4 passed (auth.delete_user mocked; rate-limit uses the live local Redis).
+
+### Task A6 — Consent & privacy center — DONE
+
+- `services/consents.py`: `get_consents` (defaults all false), `put_consents` (full replace + append-only `consent_log` doc per changed flag), `require_data_sharing` (raises `ConsentRequiredError` → routers map to 403 `CONSENT_REQUIRED`; Day 13 saturation will call it).
+- `GET/PUT /users/me/consents` (all roles); missing flag → 422 envelope via the Day-9 validation handler. No update/delete path for `consent_log` anywhere.
+- Tests (`tests/test_consents.py`): 5 passed.
+
+### Task A7 — Rent reminder scheduled job — DONE
+
+- `services/rent_reminders.py`: `find_due_leases(today)` via a new `db.list_collection_group("land_leases")` helper (returns `{doc, path}`; active lease, current month unpaid, today ≥ 5th); `run_rent_reminders(today)` notifies the landlord (`fcm.notify` — Day 13 will formalize the module; tenant SMS is a Day 13 X4 follow-up) with per-lease+month dedup against the notifications store.
+- `POST /jobs/rent-reminders/run` with the Day-9 cron-secret guard.
+- Tests (`tests/test_rent_reminders.py`): 5 passed.
+
+### Task A8 — Soil-test booking — DONE
+
+- `routers/soil_tests.py` (farmer/farmLandlord): `POST /book` (optional plotId must be own → 404 `PLOT_NOT_FOUND`; one non-reportReady booking per plot → 409 `SOIL_TEST_ALREADY_BOOKED`; slot pattern `YYYY-MM-DD am|pm`), `GET /` (own bookings, bookedAt desc, envelope).
+- Tests (`tests/test_soil_tests.py`): 5 passed.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest
+230 passed, 36 warnings in 11.66s
+  ...prior days 189 | schemes 6 | vault 5 | land_records 6 | water 5
+  account 4 | consents 5 | rent_reminders 5 | soil_tests 5
+```
+
+### Blockers / notes
+
+- **Redis required for the account rate-limit tests** — the Day-9 style in-memory patch can't count across attempts; the local Redis is used and a conftest autouse fixture now resets the cached client per test (fixes cross-event-loop pollution found in this run).
+- **`db.list_collection_group` added** (collection-group query with parent path) for the rent-reminder job; the fake scans path-keyed stores.
+- **`services/fcm.py` added early** as a thin facade over the Day-7 notifications service so A7 could depend on the stable `notify` signature (Day 13 formalizes).
+- **`/v1/users/devices` duplicates removed** — device routes live only on the top-level `/v1/devices` per the day file.
+- Vault/land-records live smoke is limited to route registration (Firebase credentials still absent); all flows covered by tests.
+- Live smoke: health 200; 18 new paths registered; unauthed `/v1/schemes` → 401.
+
 ## Day 9 — Diary, P&L, Finance, Landlord + Land market (Tasks A1–A8)
 
 **Status: implemented — 189/189 tests passing (42 new).**

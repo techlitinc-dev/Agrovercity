@@ -10,3 +10,6 @@ backend/secrets/
 
 # Command Code
 .commandcode/
+
+# Local vault uploads (dev mode)
+.local_uploads/

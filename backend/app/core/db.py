@@ -71,6 +71,12 @@ async def list_subdocs(path: str) -> list[dict]:
     return [d.to_dict() for d in docs]
 
 
+async def list_collection_group(collection_id: str) -> list[dict]:
+    """Returns [{doc, path}] where path is the parent document path (e.g. users/<uid>)."""
+    docs = await get_db().collection_group(collection_id).get()
+    return [{"doc": d.to_dict(), "path": d.reference.parent.parent.path} for d in docs]
+
+
 async def query(
     collection: str,
     filters: list[tuple[str, str, Any]],

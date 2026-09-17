@@ -23,18 +23,24 @@ from app.routers import (
     jobs,
     land,
     land_market,
+    land_records,
     lots,
     mandi,
     marketplace,
     orders,
     pnl,
     reference,
+    schemes,
     seller,
     settlements,
+    soil_tests,
     transport,
     users,
+    vault,
+    water,
     weather,
 )
+from app.routers.users import devices_router
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -70,6 +76,12 @@ app.include_router(land_market.router, prefix="/v1")
 app.include_router(bank_accounts.router, prefix="/v1")
 app.include_router(settlements.router, prefix="/v1")
 app.include_router(jobs.router, prefix="/v1")
+app.include_router(schemes.router, prefix="/v1")
+app.include_router(vault.router, prefix="/v1")
+app.include_router(land_records.router, prefix="/v1")
+app.include_router(water.router, prefix="/v1")
+app.include_router(soil_tests.router, prefix="/v1")
+app.include_router(devices_router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)
@@ -95,6 +107,12 @@ async def validation_envelope_handler(request: Request, exc: RequestValidationEr
 @app.on_event("startup")
 async def startup():
     init_firebase()
+    try:
+        from app.data.schemes_seed import seed_schemes
+
+        await seed_schemes()
+    except Exception:
+        logging.getLogger(__name__).warning("Scheme seeding skipped (Firestore unavailable)")
 
 
 @app.get("/v1/debug/sentry-test")

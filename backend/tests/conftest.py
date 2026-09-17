@@ -10,6 +10,14 @@ from app.main import app
 from app.services import users as users_service
 
 
+@pytest.fixture(autouse=True)
+def _reset_redis_global():
+    yield
+    import app.core.cache as cache_mod
+
+    cache_mod._redis = None
+
+
 @pytest.fixture
 async def client():
     transport = httpx.ASGITransport(app=app)
@@ -95,6 +103,15 @@ def fake_db(monkeypatch):
     async def fake_list_subdocs(path):
         return [copy.deepcopy(d) for d in store.get(path, {}).values()]
 
+    async def fake_list_collection_group(collection_id):
+        rows = []
+        for path, docs in store.items():
+            if path.split("/")[-1] == collection_id:
+                parent_path = "/".join(path.split("/")[:-1])
+                for doc_id, doc in docs.items():
+                    rows.append({"doc": copy.deepcopy(doc), "path": parent_path})
+        return rows
+
     monkeypatch.setattr(db, "query", fake_query)
     monkeypatch.setattr(db, "get_doc", fake_get_doc)
     monkeypatch.setattr(db, "set_doc", fake_set_doc)
@@ -104,4 +121,5 @@ def fake_db(monkeypatch):
     monkeypatch.setattr(db, "get_subdoc_at", fake_get_subdoc_at)
     monkeypatch.setattr(db, "delete_subdoc_at", fake_delete_subdoc_at)
     monkeypatch.setattr(db, "list_subdocs", fake_list_subdocs)
+    monkeypatch.setattr(db, "list_collection_group", fake_list_collection_group)
     return store

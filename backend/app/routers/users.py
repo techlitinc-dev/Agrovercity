@@ -1,11 +1,31 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timezone
+from hashlib import sha256
 
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
+
+from app.core import cache
+from app.core import db
 from app.core.deps import current_user_id
+from app.core.security import verify_mpin
+from app.models.consents import ConsentsIn, ConsentsOut
 from app.models.user import VALID_PROFILES, FarmBoundaryRequest, LinkProfileRequest, UserUpdateRequest
+from app.services import consents as consents_service
+from app.services import purge as purge_service
 from app.services.profile_routes import DEFAULT_HOME
 from app.services import users as users_service
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+class DeleteMeRequest(BaseModel):
+    mpin: str
+
+
+class DeviceRegisterRequest(BaseModel):
+    fcmToken: str
+    platform: str = Field(pattern=r"^(android|web)$")
+    locale: str = "hi"
 
 
 def _strip_mpin_hash(user: dict) -> dict:
@@ -132,3 +152,75 @@ async def set_primary_profile(profile_type: str, uid: str = Depends(current_user
     user["primaryProfile"] = profile_type
     user = await users_service.save_user(uid, user)
     return _strip_mpin_hash(user)
+
+
+@router.delete("/me")
+async def delete_me(body: DeleteMeRequest, uid: str = Depends(current_user_id)):
+    redis = await cache.get_redis()
+    attempts_key = f"del_attempts:{uid}"
+    attempts = await redis.incr(attempts_key)
+    if attempts == 1:
+        await redis.expire(attempts_key, 3600)
+    if attempts > 3:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "TOO_MANY_ATTEMPTS", "message": "Too many attempts — try again later", "fieldErrors": {}},
+        )
+
+    user = await users_service.get_user(uid)
+    if user is None:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "User not found", "fieldErrors": {}})
+    if user.get("mpinHash") is None:
+        raise HTTPException(status_code=409, detail={"code": "MPIN_NOT_SET", "message": "MPIN has not been set for this account", "fieldErrors": {}})
+    if not verify_mpin(body.mpin, user["mpinHash"]):
+        raise HTTPException(status_code=401, detail={"code": "WRONG_MPIN", "message": "Incorrect MPIN", "fieldErrors": {}})
+
+    purged = await purge_service.purge_user(uid)
+    await cache.cache_delete(attempts_key)
+    return {"deleted": True, "purged": purged}
+
+
+async def register_device(body: DeviceRegisterRequest, uid: str = Depends(current_user_id)):
+    token_hash = sha256(body.fcmToken.encode()).hexdigest()[:16]
+    await db.set_subdoc_at(
+        f"users/{uid}/devices",
+        token_hash,
+        {
+            "id": token_hash,
+            "fcmTokenHash": token_hash,
+            "platform": body.platform,
+            "locale": body.locale,
+            "lastSeenAt": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return {"registered": True}
+
+
+async def delete_device(token_hash: str, uid: str = Depends(current_user_id)):
+    await db.delete_subdoc_at(f"users/{uid}/devices", token_hash)
+    return Response(status_code=204)
+
+
+devices_router = APIRouter(tags=["devices"])
+
+
+@devices_router.post("/devices", status_code=201)
+async def register_device_top(body: DeviceRegisterRequest, uid: str = Depends(current_user_id)):
+    return await register_device(body, uid)
+
+
+@devices_router.delete("/devices/{token_hash}", status_code=204)
+async def delete_device_top(token_hash: str, uid: str = Depends(current_user_id)):
+    return await delete_device(token_hash, uid)
+
+
+@router.get("/me/consents")
+async def get_consents(uid: str = Depends(current_user_id)):
+    consents = await consents_service.get_consents(uid)
+    return ConsentsOut(**consents, updatedAt=consents.get("updatedAt", ""))
+
+
+@router.put("/me/consents")
+async def put_consents(body: ConsentsIn, uid: str = Depends(current_user_id)):
+    doc = await consents_service.put_consents(uid, body.model_dump())
+    return ConsentsOut(**body.model_dump(), updatedAt=doc["updatedAt"])
