@@ -224,3 +224,23 @@ async def get_consents(uid: str = Depends(current_user_id)):
 async def put_consents(body: ConsentsIn, uid: str = Depends(current_user_id)):
     doc = await consents_service.put_consents(uid, body.model_dump())
     return ConsentsOut(**body.model_dump(), updatedAt=doc["updatedAt"])
+
+
+@router.get("/me/bookings")
+async def my_bookings(status: str | None = None, uid: str = Depends(current_user_id)):
+    def _sorted(items: list[dict]) -> list[dict]:
+        return sorted(items, key=lambda b: b.get("date", ""), reverse=True)
+
+    equipment = {b["id"]: b for b in await db.list_subdocs(f"users/{uid}/equipment_bookings")}
+    for b in await db.query("equipment_bookings", [("userId", "==", uid)], limit=1000):
+        equipment.setdefault(b["id"], b)
+    equipment_list = [dict(b, kind="equipment") for b in equipment.values()]
+    vet_list = [dict(b, kind="vet") for b in await db.list_subdocs(f"users/{uid}/vet_bookings")]
+    transport_list = [dict(b, kind="transport") for b in await db.query("transport_bookings", [("userId", "==", uid)], limit=1000)]
+
+    if status:
+        equipment_list = [b for b in equipment_list if b.get("status") == status]
+        vet_list = [b for b in vet_list if b.get("status") == status]
+        transport_list = [b for b in transport_list if b.get("status") == status]
+
+    return {"equipment": _sorted(equipment_list), "vet": _sorted(vet_list), "transport": _sorted(transport_list)}

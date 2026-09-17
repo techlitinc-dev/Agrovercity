@@ -20,6 +20,7 @@ from app.routers import (
     finance,
     fpo,
     health,
+    insurance,
     jobs,
     land,
     land_market,
@@ -74,6 +75,7 @@ app.include_router(finance.router, prefix="/v1")
 app.include_router(land.router, prefix="/v1")
 app.include_router(land_market.router, prefix="/v1")
 app.include_router(bank_accounts.router, prefix="/v1")
+app.include_router(insurance.router, prefix="/v1")
 app.include_router(settlements.router, prefix="/v1")
 app.include_router(jobs.router, prefix="/v1")
 app.include_router(schemes.router, prefix="/v1")
@@ -108,9 +110,11 @@ async def validation_envelope_handler(request: Request, exc: RequestValidationEr
 async def startup():
     init_firebase()
     try:
+        from app.data.insurance_seed import seed_insurance_rates
         from app.data.schemes_seed import seed_schemes
 
         await seed_schemes()
+        await seed_insurance_rates()
     except Exception:
         logging.getLogger(__name__).warning("Scheme seeding skipped (Firestore unavailable)")
 

@@ -2,6 +2,55 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 11 — Crop Insurance + My Bookings (Tasks A1–A5)
+
+**Status: implemented — 259/259 tests passing (29 new).**
+
+### Task A1 — Insurance policies + rates — DONE
+
+- `models/insurance.py` (CropInsurancePolicy/PolicyApplyIn/CropPremiumRate per endpoints.md §12), `data/insurance_seed.py` — 6 premium-rate rows exactly per the day file (Wheat/Onion/Soybean Kharif, Wheat/Gram Rabi, Sugarcane Annual), idempotent `seed_insurance_rates()` called from startup (credentials-safe try/except).
+- `routers/insurance.py` (farmer/farmLandlord): `GET /policies` (demo PMFBY-2026-0001 policy seeded on first read, idempotent), `POST /policies/apply` (rate lookup by crop+season → 404 `RATE_NOT_FOUND`; exact premium math; policy number `PMFBY-{year}-{count+1:04d}`; season coverage windows), `GET /policies/{id}/certificate` (new `build_policy_certificate_pdf` in reports.py; uploads to `certificates/{uid}/`; stores `certificateUrl`), `GET /rates?season=&crop=` (envelope).
+- Tests (`tests/test_insurance_policies.py`): 8 passed.
+
+### Task A2 — Claims: photos + state machine + tracker — DONE
+
+- `models/claims.py`: full `InsuranceClaimRecord` (+ `appealCount`/`rejectionReason` from A5), timeline entries, `AppealIn`.
+- `services/claims.py`: `CLAIM_TRANSITIONS` map + `advance_status` (pure function, ValueError on illegal), `STATUS_TEXT` Hindi copy, `next_claim_number` (`CLM-YYYY-ST-####` with the state→code map and `counters/claims_{year}`), `auto_assign_surveyor` (crc32 pick from the 3-mock pool, visit date +3 days), `appeal` (A5).
+- `POST /insurance/claims` (multipart): policy ownership 404 `POLICY_NOT_FOUND`; loss-% bounds 422 envelope; per-photo jpeg/png ≤ 5 MB via the factored `storage.validate_upload` (413/415); zero photos → 422; photos uploaded under `claims/{uid}/` prefix; `requestedAmount` from sum insured × loss%; surveyor auto-assigned; `bankAccountLast4` from the phone. 201 with the full record + `photoGuidelines` (A5).
+- `GET /claims` (sorted submittedAt desc, envelope), `GET /claims/{id}` (404 `CLAIM_NOT_FOUND`) — subcollection-scoped so a user never sees another's claims.
+- Tests (`tests/test_insurance_claims.py`): 12 passed (8 + 4 appeal).
+
+### Task A3 — My Bookings aggregate — DONE
+
+- `GET /users/me/bookings?status=` (all roles): `{equipment, vet, transport}` — equipment read from the subcollection **and** the Day-8 top-level collection merged by id (Day 8 wrote top-level; Day 11 spec expects the subcollection — both supported, flagged); vet from `users/{uid}/vet_bookings` (Day 12 — absent = `[]`); transport from `transport_bookings` with the Day-7 `fare` field. `kind` on every item, `?status=` exact filter, each list sorted date desc.
+- Tests (`tests/test_my_bookings.py`): 7 passed (day file listed 7 checks under a "6 passed" heading).
+
+### Task A4 — Claim-tracker QA seed script — DONE
+
+- `scripts/seed_insurance_demo.py <uid>`: 1 demo policy + 2 claims (`surveyorAssigned` with 2 timeline entries + surveyor box; `disbursed` with `approvedAmount: 22400`, `dbtTransactionId: DBT20260901234`, 5 timeline entries). Idempotent (skips when claims exist, prints `skipped …`).
+- **Blocker:** the live double-run check needs Firestore credentials (same known blocker); the idempotency logic mirrors the seed pattern verified in prior days.
+
+### Task A5 — Claim appeal + photo guidelines — DONE
+
+- `POST /insurance/claims/{id}/appeal` (farmer, owner-only 404): rejected-only → 409 `CLAIM_NOT_REJECTED`; `appeal()` returns the claim to `intimated` with `appealCount + 1` and an appended timeline note (history preserved); appeal photos merge into `damagePhotos` capped at 5 → 422 `TOO_MANY_PHOTOS`.
+- Claim-submit 201 now carries `photoGuidelines` (3 Hindi entries, additive field).
+- Tests: 4 added.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest
+259 passed, 36 warnings in 11.66s
+  ...prior days 230 | insurance_policies 8 | insurance_claims 12 | my_bookings 7
+```
+
+### Blockers / notes
+
+- **`next_claim_number` uses get-then-set** on `counters/claims_{year}` rather than a Firestore transaction — the fake-db test harness can't exercise transactions; single-process dev is race-free enough, and the counter doc shape is transaction-ready (flagged for the hardening pass).
+- **Equipment bookings layout reconciliation:** Day 8 wrote `equipment_bookings` top-level; Day 11's aggregate expects `users/{uid}/equipment_bookings` — the aggregate merges both (dedupe by id) so neither day's data is lost.
+- `endpoints.md` was NOT modified today (no new-day routes outside existing sections; §21 already covers bank/settlement routes).
+- Live smoke: health 200; 16 insurance/booking-related paths registered; unauthed `/v1/insurance/policies` → 401 envelope. Demo seed script blocked on Firestore credentials as usual.
+
 ## Day 10 — Schemes, Vault, Land Records, Water + Account (Tasks A1–A8)
 
 **Status: implemented — 230/230 tests passing (41 new).**

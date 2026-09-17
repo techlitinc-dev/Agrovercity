@@ -14,9 +14,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
-ALLOWED_TYPES = {"image/jpeg", "image/png", "application/pdf"}
-MAX_SIZE_BYTES = 5 * 1024 * 1024
-
 
 def _docs_path(uid: str) -> str:
     return f"users/{uid}/vault_documents"
@@ -24,17 +21,8 @@ def _docs_path(uid: str) -> str:
 
 @router.post("/documents", status_code=201)
 async def upload_document(file: UploadFile = File(...), docType: str = Form(...), uid: str = Depends(current_user_id)):
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=415,
-            detail={"code": "UNSUPPORTED_FILE_TYPE", "message": "Only JPEG, PNG and PDF files are allowed", "fieldErrors": {}},
-        )
     data = await file.read()
-    if len(data) > MAX_SIZE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail={"code": "FILE_TOO_LARGE", "message": "File exceeds the 5 MB limit", "fieldErrors": {}},
-        )
+    storage_service.validate_upload(file.content_type, len(data))
     blob_path, size = storage_service.upload_user_file(uid, data, file.filename or "upload", file.content_type, prefix="vault")
     doc_id = uuid4().hex
     doc = {

@@ -62,6 +62,24 @@ def build_lease_agreement_pdf(lease: dict, landlord: dict, tenant: dict) -> str:
     return path
 
 
+def build_policy_certificate_pdf(policy: dict) -> str:
+    path = f"/tmp/policy_{policy.get('policyNumber', uuid.uuid4().hex[:8])}.pdf"
+    doc = SimpleDocTemplate(path, pagesize=A4, topMargin=15 * mm, bottomMargin=15 * mm)
+    styles = getSampleStyleSheet()
+    elements = [
+        Paragraph("Crop Insurance Policy Certificate", styles["Title"]),
+        Spacer(1, 6 * mm),
+        Paragraph(f"Policy number: {policy.get('policyNumber', '')}", styles["Normal"]),
+        Paragraph(f"Scheme: {policy.get('schemeName', '')}", styles["Normal"]),
+        Paragraph(f"Crop: {policy.get('cropName', '')} ({policy.get('season', '')} {policy.get('year', '')})", styles["Normal"]),
+        Paragraph(f"Sum insured: ₹{policy.get('sumInsured', 0):.0f}", styles["Normal"]),
+        Paragraph(f"Validity: {policy.get('coverageStartDate', '')} to {policy.get('coverageEndDate', '')}", styles["Normal"]),
+        Paragraph(f"Insurer: {policy.get('insuranceCompany', '')}", styles["Normal"]),
+    ]
+    doc.build(elements)
+    return path
+
+
 def upload_to_storage(local_path: str, dest_path: str) -> str:
     if not firebase_admin._apps:
         logger.warning("Firebase not initialised — returning local file:// URL for %s", dest_path)

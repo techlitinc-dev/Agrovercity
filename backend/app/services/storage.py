@@ -11,9 +11,28 @@ from uuid import uuid4
 
 import firebase_admin
 
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_TYPES = {"image/jpeg", "image/png", "application/pdf"}
+MAX_SIZE_BYTES = 5 * 1024 * 1024
+
+
+def validate_upload(content_type: str | None, size_bytes: int):
+    """Shared guard for JPEG/PNG/PDF uploads ≤ 5 MB (vault + claim photos)."""
+    from fastapi import HTTPException
+
+    if content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail={"code": "UNSUPPORTED_FILE_TYPE", "message": "Only JPEG, PNG and PDF files are allowed", "fieldErrors": {}},
+        )
+    if size_bytes > MAX_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "FILE_TOO_LARGE", "message": "File exceeds the 5 MB limit", "fieldErrors": {}},
+        )
+
 
 # backend/.local_uploads — resolved from this file's location, not the process CWD
 LOCAL_UPLOAD_DIR = Path(__file__).resolve().parents[2] / ".local_uploads"
