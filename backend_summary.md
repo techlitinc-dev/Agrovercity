@@ -2,6 +2,55 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 6 — Marketplace + payments (Tasks A1–A4)
+
+**Status: implemented — 96/96 tests passing (25 new).**
+
+### Task A1 — Products + certificate + cart — DONE
+
+- `backend/app/models/marketplace.py`: `ProductOut`, `CertificateOut`, `CartItemRequest` (+ `CartItemUpdateRequest`, order models for A2).
+- `scripts/seed_products.py`: 3 products (seeds/fertilizer/pesticide, each with `batchNo`) + `certificates` keyed by batchNo (`AGMARK / Ministry of Agriculture`, valid, verifiedAt). Data constants imported by tests.
+- `backend/app/routers/marketplace.py` (roles farmer/farmLandlord/transport/seller): `GET /products` (exact category + substring query on title/vernacularTitle, envelope), `GET /products/{id}` (404 `PRODUCT_NOT_FOUND`), `GET /products/{id}/certificate` (404 `CERTIFICATE_NOT_FOUND`), `GET /cart` (`{data: [{productId, quantity, product}], cartTotal}`), `POST /cart/items` (product-exists 404, quantity ≥ 1 → 422; upsert into `carts/{uid}.items` map), `PUT /cart/items/{productId}` (≤ 0 removes), `DELETE /cart/items/{productId}`.
+- `core/db.py` gains `delete_doc` (needed for address deletion; flagged as a minimal addition outside the day-file list).
+- Tests (`tests/test_marketplace.py`): 6 passed.
+
+### Task A2 — Orders + Razorpay create/verify — DONE
+
+- `backend/app/services/payments.py`: `create_razorpay_order` (dev fake `order_dev_{receipt}` with empty keys; real POST with basic auth otherwise), `verify_razorpay_signature` (HMAC-SHA256 of `order|payment`; dev mode accepts signature `"dev"`), `refund_razorpay_payment` (A3).
+- `backend/app/routers/orders.py`: `POST /orders` — idempotency via `idempotency_keys/{key}` (replay returns the original response), validates paymentMethod/items/product existence, computes `total` from current `discountedPrice`, bnpl → 2-installment schedule (`total//2` + remainder), creates the order doc (`status: "placed"`, `refundStatus: "none"`), clears the cart; `GET /orders` (newest first, envelope); `GET /orders/{id}` (404 `ORDER_NOT_FOUND`, 403 not-owner); `POST /payments/razorpay/order` (stores `razorpayOrderId`, returns `keyId: "rzp_test_dev"` in dev); `POST /payments/razorpay/verify` (signature fail → 400 `PAYMENT_SIGNATURE_INVALID`; success → `status: "paid"`).
+- Tests (`tests/test_orders.py`): 6 passed — place+cart-cleared, idempotency, bnpl schedule sums to total, list/detail + 403, dev-mode create/verify, bad signature 400.
+
+### Task A3 — Order cancel + Razorpay refund — DONE
+
+- `POST /orders/{id}/cancel` (absent/not-owned → 404 `ORDER_NOT_FOUND`): allowed only in `placed|paid`, else 409 `ORDER_NOT_CANCELLABLE`; sets `cancelledAt`; paid orders get `refundStatus: "requested"`.
+- `POST /payments/razorpay/refund`: requires cancelled + requested + paymentId else 409 `REFUND_NOT_APPLICABLE`; dev refund `rfnd_dev_{paymentId}`; sets `refundStatus: "processed"` + `razorpayRefundId`; idempotent replay returns 200 without a second refund call.
+- Tests (`tests/test_order_cancel.py`): 6 passed.
+
+### Task A4 — /v1/addresses CRUD + order addressId — DONE
+
+- `backend/app/models/addresses.py`: `AddressRequest` (6-digit pincode validation → 422 `VALIDATION_ERROR`).
+- `backend/app/routers/addresses.py` (any authenticated user): `GET /addresses` (default first), `POST /addresses` (201; first address forced default; `isDefault` clears others), `PUT /addresses/{id}` (owner-only → 404 `ADDRESS_NOT_FOUND`; same default rule), `DELETE /addresses/{id}` (204; promotes the oldest remaining address when the default is deleted).
+- `POST /orders` accepts optional `addressId`: owner-checked (404 `ADDRESS_NOT_FOUND`), composes `deliveryAddress` as `"{line1}, {village}, {district}, {state} - {pincode}"`; free-text path still works.
+- Tests (`tests/test_addresses.py`): 7 passed.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest -v
+96 passed, 2 warnings in 6.15s
+  app_config 4 | auth 5 | infra 3 | mpin 5 | users 6 | profiles 6 | referral 4
+  role_profiles 5 | reference 6 | weather 3 | mandi 4 | vyapari 10 | lots 6 | history 4
+  marketplace 6 | orders 6 | order_cancel 6 | addresses 7
+```
+
+### Blockers / notes
+
+- **Seed script blocked on Firestore credentials** (same as prior days) — `DefaultCredentialsError`; data verified via tests importing the seed constants. Rerun once credentials exist.
+- **`ORDER_ACCESS_DENIED` (403)** is a new code — the day file mandates 403 for non-owner detail access but names no code; flagged per conventions.
+- **`delete_doc` added to `core/db.py`** — required by `DELETE /addresses`; not in the day-file list, flagged as a minimal addition.
+- Cart totals sum `discountedPrice × quantity` as floats (the day-file `ProductOut` uses float prices); BNPL installments are integer rupees split `total//2` + remainder so they always sum exactly to `total`.
+- Live smoke: health 200; all 14 new routes registered (products/certificate/cart/orders/payments/addresses); unauthed `/v1/products` → 401.
+
 ## Day 5 — Mandi (Tasks A1–A5)
 
 **Status: implemented — 71/71 tests passing (24 new).**

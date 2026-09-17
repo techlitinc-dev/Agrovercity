@@ -26,6 +26,10 @@ async def set_doc(collection: str, doc_id: str, data: dict):
     await get_db().collection(collection).document(doc_id).set(data)
 
 
+async def delete_doc(collection: str, doc_id: str):
+    await get_db().collection(collection).document(doc_id).delete()
+
+
 async def query(
     collection: str,
     filters: list[tuple[str, str, Any]],
