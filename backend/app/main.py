@@ -1,12 +1,13 @@
 import logging
 
 import sentry_sdk
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from app.core.config import settings
 from app.core.firebase import init_firebase
-from app.routers import app_config, health
+from app.routers import app_config, auth, health
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -19,6 +20,15 @@ if settings.sentry_dsn:
 app = FastAPI(title="AGROVERCITY API", version="0.1.0")
 app.include_router(health.router, prefix="/v1")
 app.include_router(app_config.router, prefix="/v1")
+app.include_router(auth.router, prefix="/v1")
+
+
+@app.exception_handler(HTTPException)
+async def error_envelope_handler(request: Request, exc: HTTPException):
+    detail = exc.detail
+    if not isinstance(detail, dict):
+        detail = {"code": "ERROR", "message": str(detail), "fieldErrors": {}}
+    return JSONResponse(status_code=exc.status_code, content={"error": detail}, headers=exc.headers)
 
 
 @app.on_event("startup")

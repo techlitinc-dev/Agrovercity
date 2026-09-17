@@ -2,6 +2,44 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 2 — Auth backend (Tasks A1–A2)
+
+**Status: implemented — 17/17 tests passing.**
+
+### Task A1 — POST /v1/auth/firebase-verify + JWT issue/refresh — DONE
+
+- `backend/app/models/auth.py`: `FirebaseVerifyRequest`, `TokenPair`, `AuthResponse`, `RefreshRequest` (+ `MpinSetRequest`, `MpinVerifyRequest`, `MpinResetRequest`, `OkResponse` for A2).
+- `backend/app/services/tokens.py`: `create_access_token`, `create_refresh_token` (HS256 via python-jose, `sub`/`type`/`iat`/`exp` claims), `decode_token(token, expected_type)` → 401 `INVALID_TOKEN` on JWTError or type mismatch.
+- `backend/app/services/users.py`: `upsert_user_from_firebase` creates the full `users/{uid}` doc per day-file template (createdAt = UTC ISO); `get_user`; `set_mpin_hash`.
+- `backend/app/routers/auth.py` (prefix `/auth`): `POST /firebase-verify` verifies the Firebase ID token, normalizes phone to `+91...`, upserts the user, returns `AuthResponse` with `mpinHash` stripped (schema: never returned); 401 `INVALID_FIREBASE_TOKEN` on `InvalidIdTokenError`. `POST /refresh` rotates both tokens.
+- `main.py`: auth router mounted; **error-envelope exception handler** — every `HTTPException` with a dict detail now renders as `{ "error": { "code", "message", "fieldErrors" } }` (conventions §6). Non-dict details are wrapped as `{"code": "ERROR"}`.
+- Tests (`tests/test_auth.py`, fixtures in `tests/conftest.py` — mocked `firebase_admin.auth.verify_id_token` + in-memory user store patching `app.services.users.get_doc/set_doc`): new-user verify, invalid token → 401 envelope, existing-user verify (`isNewUser: False`), refresh roundtrip, access-token-to-refresh → 401 `INVALID_TOKEN`. 5 passed.
+
+### Task A2 — MPIN set / verify / reset — DONE
+
+- `backend/app/core/security.py`: passlib `CryptContext` bcrypt; `hash_mpin`, `verify_mpin`, `validate_mpin_format` (4 ASCII digits, else 422 `INVALID_MPIN_FORMAT`).
+- `backend/app/core/deps.py`: `current_user_id` — parses `Bearer <token>`, decodes as access token; missing/malformed header → 401 `MISSING_TOKEN`.
+- Endpoints on `routers/auth.py`: `POST /mpin/set` (auth, validates format, stores bcrypt hash), `POST /mpin/verify` (auth; 409 `MPIN_NOT_SET` if no hash; 401 `WRONG_MPIN` on mismatch), `POST /mpin/reset` (public, requires fresh Firebase ID token; 404 `NOT_FOUND` if user absent).
+- Tests (`tests/test_mpin.py`): set+verify happy path, wrong MPIN → 401, verify-before-set → 409, bad format → 422, reset swaps hash (old fails, new verifies). 5 passed.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest -v
+tests/test_app_config.py  4 passed
+tests/test_auth.py        5 passed
+tests/test_infra.py       3 passed
+tests/test_mpin.py        5 passed
+17 passed, 2 warnings in 2.37s
+```
+
+### Blockers / notes
+
+- **Dependency deviation (reported per conventions §1.7):** `bcrypt` pinned to `<4.1` in `requirements.txt`. passlib 1.7.4 is incompatible with bcrypt ≥ 4.1 (its backend detection feeds bcrypt 5 a >72-byte "password" → `ValueError`). The day file lists `passlib[bcrypt]>=1.7.4` without a pin; the pin is the minimal fix. Alternative (replacing passlib with raw `bcrypt`) would deviate further from the day file.
+- **Day-1 test updated:** `test_app_config_missing` now asserts the `{"error": {"code": "APP_CONFIG_MISSING"}}` envelope instead of FastAPI's default `{"detail": ...}` — the new envelope handler (a Day-2 deliverable) changed the response shape.
+- **Firebase not initialized in this environment** (no service-account JSON): live `POST /v1/auth/firebase-verify` with a garbage token returns 500 because `verify_id_token` raises `ValueError` before token parsing. With credentials present it raises `InvalidIdTokenError` → 401 envelope, which the mocked tests verify. Live happy-path testing is blocked on credentials, same as Day 1 seeding.
+- `MISSING_TOKEN`, envelope shapes verified live: mpin/verify without auth → 401 envelope; health still 200.
+
 ## Day 1 — Foundation (Tasks A1–A4)
 
 **Status: implemented — 7/7 tests passing.**

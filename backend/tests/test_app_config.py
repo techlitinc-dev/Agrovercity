@@ -56,4 +56,4 @@ async def test_app_config_missing(client, monkeypatch):
     monkeypatch.setattr(app_config, "get_doc", fake_get_doc)
     resp = await client.get("/v1/app-config")
     assert resp.status_code == 404
-    assert resp.json()["detail"]["code"] == "APP_CONFIG_MISSING"
+    assert resp.json()["error"]["code"] == "APP_CONFIG_MISSING"
