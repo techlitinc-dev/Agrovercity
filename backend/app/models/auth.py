@@ -18,6 +18,10 @@ class AuthResponse(BaseModel):
     user: dict
 
 
+class RegisterResponse(AuthResponse):
+    referral: dict = {"applied": False}
+
+
 class RefreshRequest(BaseModel):
     refreshToken: str
 

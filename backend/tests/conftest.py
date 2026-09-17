@@ -1,3 +1,5 @@
+import copy
+
 import firebase_admin.auth as fb_auth
 import httpx
 import pytest
@@ -15,19 +17,33 @@ async def client():
 
 @pytest.fixture
 def fake_users(monkeypatch):
-    store = {}
+    store = {"users": {}, "referral_attributions": {}, "role_profiles": {}}
 
     async def fake_get_doc(collection, doc_id):
-        if collection != "users":
-            return None
-        return store.get(doc_id)
+        data = store.get(collection, {}).get(doc_id)
+        return copy.deepcopy(data) if data is not None else None
 
     async def fake_set_doc(collection, doc_id, data):
-        if collection == "users":
-            store[doc_id] = dict(data)
+        store.setdefault(collection, {})[doc_id] = copy.deepcopy(data)
+
+    async def fake_query(collection, filters, limit=100):
+        out = [copy.deepcopy(d) for d in store.get(collection, {}).values()]
+        for field, op, value in filters:
+            if op == "==":
+                out = [d for d in out if d.get(field) == value]
+        return out[:limit]
+
+    async def fake_set_role_profile(uid, profile_type, data):
+        store["role_profiles"].setdefault(uid, {})[profile_type] = copy.deepcopy(data)
+
+    async def fake_get_role_profiles(uid):
+        return copy.deepcopy(store["role_profiles"].get(uid, {}))
 
     monkeypatch.setattr(users_service, "get_doc", fake_get_doc)
     monkeypatch.setattr(users_service, "set_doc", fake_set_doc)
+    monkeypatch.setattr(users_service, "query", fake_query)
+    monkeypatch.setattr(users_service, "set_role_profile", fake_set_role_profile)
+    monkeypatch.setattr(users_service, "get_role_profiles", fake_get_role_profiles)
     return store
 
 

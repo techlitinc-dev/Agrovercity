@@ -7,7 +7,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from app.core.config import settings
 from app.core.firebase import init_firebase
-from app.routers import app_config, auth, health
+from app.routers import app_config, auth, health, users
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -21,6 +21,7 @@ app = FastAPI(title="AGROVERCITY API", version="0.1.0")
 app.include_router(health.router, prefix="/v1")
 app.include_router(app_config.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
+app.include_router(users.router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)

@@ -2,6 +2,54 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 3 — Profile API (Tasks A1–A4)
+
+**Status: implemented — 38/38 tests passing (21 new).**
+
+### Task A1 — POST /v1/auth/register + GET/PUT /v1/users/me + farm boundary — DONE
+
+- `backend/app/models/user.py`: `FarmBoundaryPoint`, `RegisterRequest` (with `idToken` per the day-file rule — register requires a verified Firebase token; optional `referralCode`, `roleProfiles` for A3/A4), `UserUpdateRequest` (all-optional), `FarmBoundaryRequest`, `VALID_PROFILES` set.
+- `POST /auth/register` in `routers/auth.py`: verifies `idToken`, validates MPIN format, profile types (`422 INVALID_PROFILE_TYPE` for unknown types, empty profiles, or primary not in profiles), and phone-vs-token match (`400 PHONE_MISMATCH` — code not named in the day file, flagged in notes); requires a preceding `firebase-verify` (404 `NOT_FOUND` otherwise); updates the user doc with all wizard fields, `activeCrops`, `linkedProfiles`, `primaryProfile`, `activeProfile`, `mpinHash`; returns new tokens + full user (`mpinHash` stripped).
+- `backend/app/routers/users.py`: `GET /me` (full user doc + additive `roleProfiles`), `PUT /me` (applies only non-None fields), `PUT /me/farm-boundary` (requires `farmer` in `linkedProfiles` → 403 `FORBIDDEN_ROLE`; stores points as `{lat,lng}`, `landAreaAcres`, `khasraNumber`). `require_role(user, *roles)` helper checks `activeProfile` per the day-file rule.
+- `main.py`: users router mounted under `/v1`.
+- Tests (`tests/test_users.py`): 6 passed — full-profile register, primary-not-in-profiles 422, GET /me keys, partial PUT, farm-boundary roundtrip, auth required.
+
+### Task A2 — Profile link / unlink / activate / primary — DONE
+
+- `backend/app/services/profile_routes.py`: `ACCESS_MAP` + `DEFAULT_HOME` ported from the persona×screen matrix (`docs/overview/04` §2) — `flutter-prototype/` is absent from this repo, so the matrix doc (which the day file says mirrors the prototype file) is the source used.
+- `routers/users.py`: `POST /me/profiles` (409 `PROFILE_ALREADY_LINKED`), `DELETE /me/profiles/{type}` (404 `PROFILE_NOT_LINKED`; 409 `LAST_PROFILE` with message `कम से कम एक प्रोफाइल आवश्यक है`; promotes primary and falls back activeProfile), `POST /me/profiles/{type}/activate` (returns `activeProfile`, `defaultHomeRoute`, `user`), `PUT /me/profiles/{type}/primary`.
+- Tests (`tests/test_profiles.py`): 6 passed — link, duplicate 409, last-profile 409, activate default home, unlink-active-promotes-primary, primary star.
+
+### Task A3 — Referral code on register — DONE
+
+- `referralCode: "ref_" + uid[:8]` generated for every user (new-user template + backfill on read of old docs, in `services/users.py`).
+- `RegisterRequest.referralCode` optional; on register: lookup via `users` query on `referralCode` → 400 `INVALID_REFERRAL_CODE` for unknown code or self-referral; success writes `referral_attributions/{newUid}` with `status: "pending"` (coin award deferred to Day 13 — commented).
+- Additive `referral: { "applied": bool }` on the register response (`RegisterResponse(AuthResponse)`).
+- Tests (`tests/test_referral.py`): 4 passed — valid referral (attribution doc pending), invalid code 400, no referral (applied false, no doc), self-referral 400.
+
+### Task A4 — Per-persona roleProfiles on register — DONE
+
+- `backend/app/models/role_profiles.py`: `TransportRoleProfile`, `SellerRoleProfile`, `FarmLandlordRoleProfile`, `BrokerRoleProfile` + `ROLE_PROFILE_MODELS`.
+- `RegisterRequest.roleProfiles: dict[str, dict] | None`; keys must be in `profiles` AND in `ROLE_PROFILE_MODELS`; failed variant parse → 422 `INVALID_ROLE_PROFILE` with `fieldErrors` keyed by profile type.
+- Validated variants written to `users/{uid}/role_profiles/{profileType}` with `createdAt` (optionals omitted via `exclude_none`); `GET /me` returns them under additive `roleProfiles` ({} when none).
+- Tests (`tests/test_role_profiles.py`): 5 passed — transport variant, seller optionals, missing-required 422, key-not-in-profiles 422, landlord+broker variants.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest -v
+38 passed, 2 warnings in 5.68s
+  test_app_config.py  4 | test_auth.py 5 | test_infra.py 3 | test_mpin.py 5
+  test_users.py 6 | test_profiles.py 6 | test_referral.py 4 | test_role_profiles.py 5
+```
+
+### Blockers / notes
+
+- **`flutter-prototype/` missing from this repo** — `profile_routes.dart` could not be ported file-to-file; `ACCESS_MAP` was built from `docs/overview/04-persona-screen-matrix.md` §2 (the doc that mirrors the prototype's map). If the prototype appears later, diff the two.
+- **`PHONE_MISMATCH` (400)** and `INVALID_ROLE_PROFILE`/`INVALID_PROFILE_TYPE` (422) codes are not in the conventions §6 named list — used where the day file mandates the behavior but names no code. Flagging for operator review.
+- **Register ordering:** validation order is idToken → MPIN format → phone match → profile/role-profile validity → user-exists → referral. Tests must call `firebase-verify` first (the day-file "preceding firebase-verify" rule).
+- Firebase credentials still absent here, so live register cannot pass token verification (same as Day 2); mocked tests cover the full flow. Live smoke: health 200, `/users/me` without auth → 401 envelope, register body validation → 422.
+
 ## Day 2 — Auth backend (Tasks A1–A2)
 
 **Status: implemented — 17/17 tests passing.**
