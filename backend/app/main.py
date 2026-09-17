@@ -2,6 +2,7 @@ import logging
 
 import sentry_sdk
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
@@ -11,17 +12,25 @@ from app.routers import (
     addresses,
     app_config,
     auth,
+    bank_accounts,
     contracts,
+    diary,
     equipment,
     equipment_owner,
+    finance,
     fpo,
     health,
+    jobs,
+    land,
+    land_market,
     lots,
     mandi,
     marketplace,
     orders,
+    pnl,
     reference,
     seller,
+    settlements,
     transport,
     users,
     weather,
@@ -53,6 +62,14 @@ app.include_router(transport.router, prefix="/v1")
 app.include_router(equipment.router, prefix="/v1")
 app.include_router(equipment_owner.router, prefix="/v1")
 app.include_router(fpo.router, prefix="/v1")
+app.include_router(diary.router, prefix="/v1")
+app.include_router(pnl.router, prefix="/v1")
+app.include_router(finance.router, prefix="/v1")
+app.include_router(land.router, prefix="/v1")
+app.include_router(land_market.router, prefix="/v1")
+app.include_router(bank_accounts.router, prefix="/v1")
+app.include_router(settlements.router, prefix="/v1")
+app.include_router(jobs.router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)
@@ -61,6 +78,18 @@ async def error_envelope_handler(request: Request, exc: HTTPException):
     if not isinstance(detail, dict):
         detail = {"code": "ERROR", "message": str(detail), "fieldErrors": {}}
     return JSONResponse(status_code=exc.status_code, content={"error": detail}, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_envelope_handler(request: Request, exc: RequestValidationError):
+    field_errors = {}
+    for err in exc.errors():
+        loc = ".".join(str(part) for part in err["loc"][1:])
+        field_errors[loc] = err["msg"]
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": "VALIDATION_ERROR", "message": "Validation failed", "fieldErrors": field_errors}},
+    )
 
 
 @app.on_event("startup")

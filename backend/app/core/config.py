@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     sarvam_api_key: str = ""
     weather_api_key: str = ""
     sentry_dsn: str = ""
+    cron_secret: str = ""
 
 
 settings = Settings()

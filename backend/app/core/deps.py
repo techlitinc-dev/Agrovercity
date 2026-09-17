@@ -25,3 +25,12 @@ def require_roles(*roles):
         return user
 
     return dependency
+
+
+def require_profile(user: dict, *roles):
+    """In-request variant for routers that already loaded the user."""
+    if user is None or user.get("activeProfile") not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "FORBIDDEN_ROLE", "message": "Active profile is not permitted for this action", "fieldErrors": {}},
+        )

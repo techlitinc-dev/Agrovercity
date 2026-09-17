@@ -259,3 +259,41 @@
 | **IMD / OpenWeather** | weather strip & radar (§5) |
 | **Payment gateway + BNPL partner** | marketplace orders, workshops, loans (§6, §11, §17) |
 | **SMS/WhatsApp provider** | OTP, referrals, booking reminders, owner notifications |
+
+---
+
+## 21. Landlord Land Management
+
+Roles: `farmer, farmLandlord`. Errors use the standard error envelope (Conventions §6). All money fields are integer/float whole rupees (Conventions §8). Firestore: plots/leases live in `users/{uid}/…` subcollections.
+
+| Method | Endpoint | Description | Request | Response |
+|---|---|---|---|---|
+| GET | `/v1/land/plots` | List the caller's plots | `?page=&pageSize=` | envelope `PlotOut[]` |
+| POST | `/v1/land/plots` | Create a plot | `PlotIn {name, village, district, areaAcres>0, gatNumber?, soilType?}` | 201 `PlotOut` (`status: "vacant"`) |
+| PUT | `/v1/land/plots/{id}` | Partial plot update | partial `PlotIn` | 200 `PlotOut` |
+| DELETE | `/v1/land/plots/{id}` | Delete a plot | — | 204; 409 `PLOT_HAS_ACTIVE_LEASE` |
+| GET | `/v1/land/leases` | List leases | `?status=active\|ended&page=&pageSize=` | envelope `LeaseOut[]` |
+| POST | `/v1/land/leases` | Create a lease (marks plot leased) | `LeaseIn {plotId, tenantName, tenantPhone, monthlyRentRupees>0, startDate, endDate}` | 201 `LeaseOut` (`status: "active"`, `verified: false`) |
+| PUT | `/v1/land/leases/{id}` | Update rent/end/status/verify | `{monthlyRentRupees?, endDate?, status?, verified?}` | 200 `LeaseOut`; ending frees the plot |
+| DELETE | `/v1/land/leases/{id}` | Delete a lease | — | 204; active lease reverts plot to vacant |
+| POST | `/v1/land/leases/{id}/payments` | Record a rent payment | `RentPaymentIn {amountRupees>0, month: YYYY-MM, method: cash\|upi\|bank, paidAt}` | 201 `RentPaymentOut`; 409 `DUPLICATE_PAYMENT_MONTH` |
+| GET | `/v1/land/leases/{id}/payments` | Payments + summary | `?page=&pageSize=` | envelope `RentPaymentOut[]` + `totalCollectedRupees` + `pendingMonths[]` |
+| POST | `/v1/land/listings` | Create a land listing (farmLandlord) | `LandListingIn {village, district, lat, lng, areaAcres>0, expectedRentRupees>0, soilType?, waterSource?, plotId?}` | 201 `LandListingOut` (`status: "open"`) |
+| GET | `/v1/land/listings` | Browse open listings | `?near=lat,lng` (≤25 km), `?acres=`, `?page=&pageSize=` | envelope `LandListingOut[]` |
+| GET | `/v1/land/listings/mine` | Own listings, any status | `?page=&pageSize=` | envelope `LandListingOut[]` |
+| PUT | `/v1/land/listings/{id}` | Update own listing | `LandListingIn` | 200 `LandListingOut` |
+| DELETE | `/v1/land/listings/{id}` | Delete own listing | — | 204; 409 `LISTING_HAS_ACTIVE_LEASE` |
+| POST | `/v1/land/lease-requests` | Request a lease on a listing (farmer) | `LeaseRequestIn {listingId, message?, durationMonths 1–120}` | 201 `LeaseRequestOut`; 409 `LISTING_NOT_OPEN`/`DUPLICATE_LEASE_REQUEST` |
+| GET | `/v1/land/lease-requests` | Inbox for own listings (farmLandlord) | `?status=pending\|accepted\|rejected&page=&pageSize=` | envelope `LeaseRequestOut[]` |
+| POST | `/v1/land/lease-requests/{id}/accept` | Accept → creates the lease, listing becomes `leased`, competing requests auto-rejected | — | 200 `{leaseId}` |
+| POST | `/v1/land/lease-requests/{id}/reject` | Reject with optional reason | `{reason?}` | 200 `{status: "rejected"}` |
+| GET | `/v1/land/leases/{id}/agreement-pdf` | Agreement PDF (landlord or matching-tenant tenant) | — | 200 `{agreementUrl}` |
+| GET | `/v1/bank-accounts` | List payout accounts (primary first) | `?page=&pageSize=` | envelope `BankAccountOut[]` (masked numbers only) |
+| POST | `/v1/bank-accounts` | Add a payout account | `BankAccountIn {accountHolder, accountNumber 9–18 digits, ifsc, bankName}` | 201 `BankAccountOut` (`verifyStatus: "unverified"`; first is primary) |
+| POST | `/v1/bank-accounts/{id}/verify` | Penny-drop verify | — | 200 `BankAccountOut` |
+| POST | `/v1/bank-accounts/{id}/set-primary` | Set as primary payout account | — | 200 `{primaryId}` |
+| DELETE | `/v1/bank-accounts/{id}` | Delete an account | — | 204; primary promotion to oldest remaining |
+| POST | `/v1/jobs/settlements/run` | Nightly settlement aggregation (cron-only) | header `X-Cron-Secret`; `SettlementRunIn {periodStart?, periodEnd?}` | 200 `{created, updated, periodStart, periodEnd}` |
+| GET | `/v1/transport/settlements` | Transporter settlements | `?page=&pageSize=` | envelope `SettlementOut[]` |
+| GET | `/v1/equipment/settlements` | Equipment-owner settlements | `?page=&pageSize=` | envelope `SettlementOut[]` |
+| GET | `/v1/broker/settlements` | Broker settlements | `?page=&pageSize=` | envelope `SettlementOut[]` |

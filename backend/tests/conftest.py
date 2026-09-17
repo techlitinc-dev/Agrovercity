@@ -82,9 +82,26 @@ def fake_db(monkeypatch):
     async def fake_set_subdoc(collection, doc_id, subcollection, subdoc_id, data):
         store.setdefault(f"{collection}/{doc_id}/{subcollection}", {})[subdoc_id] = copy.deepcopy(data)
 
+    async def fake_set_subdoc_at(path, subdoc_id, data):
+        store.setdefault(path, {})[subdoc_id] = copy.deepcopy(data)
+
+    async def fake_get_subdoc_at(path, subdoc_id):
+        data = store.get(path, {}).get(subdoc_id)
+        return copy.deepcopy(data) if data is not None else None
+
+    async def fake_delete_subdoc_at(path, subdoc_id):
+        store.get(path, {}).pop(subdoc_id, None)
+
+    async def fake_list_subdocs(path):
+        return [copy.deepcopy(d) for d in store.get(path, {}).values()]
+
     monkeypatch.setattr(db, "query", fake_query)
     monkeypatch.setattr(db, "get_doc", fake_get_doc)
     monkeypatch.setattr(db, "set_doc", fake_set_doc)
     monkeypatch.setattr(db, "delete_doc", fake_delete_doc)
     monkeypatch.setattr(db, "set_subdoc", fake_set_subdoc)
+    monkeypatch.setattr(db, "set_subdoc_at", fake_set_subdoc_at)
+    monkeypatch.setattr(db, "get_subdoc_at", fake_get_subdoc_at)
+    monkeypatch.setattr(db, "delete_subdoc_at", fake_delete_subdoc_at)
+    monkeypatch.setattr(db, "list_subdocs", fake_list_subdocs)
     return store

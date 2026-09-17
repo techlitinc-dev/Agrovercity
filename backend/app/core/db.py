@@ -41,6 +41,36 @@ async def set_subdoc(collection: str, doc_id: str, subcollection: str, subdoc_id
     )
 
 
+def _collection_ref_from_path(path: str):
+    parts = path.split("/")
+    ref = get_db().collection(parts[0])
+    i = 1
+    while i < len(parts):
+        ref = ref.document(parts[i]).collection(parts[i + 1])
+        i += 2
+    return ref
+
+
+async def set_subdoc_at(path: str, subdoc_id: str, data: dict):
+    await _collection_ref_from_path(path).document(subdoc_id).set(data)
+
+
+async def get_subdoc_at(path: str, subdoc_id: str) -> dict | None:
+    snap = await _collection_ref_from_path(path).document(subdoc_id).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+async def delete_subdoc_at(path: str, subdoc_id: str):
+    await _collection_ref_from_path(path).document(subdoc_id).delete()
+
+
+async def list_subdocs(path: str) -> list[dict]:
+    docs = await _collection_ref_from_path(path).get()
+    return [d.to_dict() for d in docs]
+
+
 async def query(
     collection: str,
     filters: list[tuple[str, str, Any]],

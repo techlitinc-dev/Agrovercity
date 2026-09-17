@@ -2,6 +2,77 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 9 — Diary, P&L, Finance, Landlord + Land market (Tasks A1–A8)
+
+**Status: implemented — 189/189 tests passing (42 new).**
+
+### File split (reported per conventions §1.4)
+
+`routers/land.py` (A4 + A8 combined) would exceed 300 lines — split into `routers/land.py` (plots/leases/payments) and `routers/land_market.py` (listings/lease-requests/agreement PDF), sharing helpers in `services/land.py`.
+
+### Task A1 — Diary entries CRUD + PDF report — DONE
+
+- `models/diary.py` (field names per endpoints.md §8), `services/coins.py` (`award_coins` — balance increment + `users/{uid}/coin_ledger` doc; stable signature for Day 13), `services/reports.py` (reportlab diary PDF + `upload_to_storage` — dev mode returns `file://` with a warning when Firebase isn't initialised).
+- `routers/diary.py` (farmer/farmLandlord): `GET /entries` (type/category/from/to filters, date desc, envelope), `POST /entries` (201, +15 coins), `DELETE /entries/{id}` (204 / 404 `ENTRY_NOT_FOUND`), `GET /diary/report?from=&to=` (default current month; Storage URL).
+- `core/db.py` gains path-based subcollection helpers (`set_subdoc_at`/`get_subdoc_at`/`delete_subdoc_at`/`list_subdocs`) — `query()` only handles top-level collections; flagged as an addition the day file implied ("local helper") but needed across 4 routers.
+- PDF validity verified: `file` reports "PDF document, version 1.4".
+- Tests (`tests/test_diary.py`): 5 passed.
+
+### Task A2 — P&L endpoints — DONE
+
+- `models/pnl.py`, `data/demo_pnl.py` (Wheat + Onion stand-ins — prototype absent, flagged). `routers/pnl.py` (5 roles): `GET /summary` (zeros when empty), `GET /crops` (seeds the 2 demo crops on first read), `POST /crops/{id}/expenses` (append + recompute totalExpenses/netProfit/roiPercent, 0-division safe), `POST /break-even` (pure `ceil(totalCost / yield)`; pydantic gt=0).
+- Tests (`tests/test_pnl.py`): 5 passed — including break-even 50000/20 → 2500 and the 422 envelope for zero yield.
+
+### Task A3 + A6 — Finance endpoints + loan status list — DONE
+
+- `routers/finance.py`: `GET /credit-score` (defaults 650/Silver + tier→limit map), `POST /loan-calculator` (standard EMI formula), `GET /kcc` (404 `KCC_NOT_FOUND`; masked `XXXX-XXXX-<phone last 4>`), `POST /loans/apply` (201, `loan_applications`), `GET /loans` (A6: newest first, envelope, empty = 200).
+- **Day-file discrepancy flagged:** the day file's quoted EMI ≈ 4256.44 does not match its own formula — the exact standard-formula EMI for 25000/6/7% is **4252.15**. The formula (the normative spec) is implemented; the test asserts 4252.15 with a comment.
+- Tests (`tests/test_finance.py`): 7 passed.
+
+### Task A4 — Landlord plots/leases/rent payments — DONE
+
+- `models/land.py` (Plot/Lease/RentPayment + listing/request models for A8), `routers/land.py`: plots CRUD (201 vacant; delete blocked by active lease → 409 `PLOT_HAS_ACTIVE_LEASE`), leases CRUD (endDate > startDate → 422; create marks plot `leased`; end/delete reverts to `vacant`), payments (duplicate month → 409 `DUPLICATE_PAYMENT_MONTH`; summary with `totalCollectedRupees` + `pendingMonths` from lease start through the current month).
+- Tests (`tests/test_land.py`): 7 passed.
+
+### Task A5 — Bank accounts + penny-drop adapter — DONE
+
+- `services/bank_verify/{base,stub,__init__.py}`: `BankVerifyAdapter` ABC + stub (mocked success) + `get_bank_verify_adapter()` via `BANK_VERIFY_ADAPTER` env (default stub; real provider later).
+- `routers/bank_accounts.py` (all roles): list (primary first, envelope), create (first account auto-primary, `unverified`), verify (pending → adapter → verified/failed), set-primary (unsets others), delete (204; oldest remaining promoted). Full accountNumber is stored only in `users/{uid}/bank_accounts`; **responses carry the masked form only** (module docstring notes Firestore AES-256/GMEK and the never-log rule).
+- Deviation: `test_claim_uses_primary_account_last4` deferred — the Day 11 claims flow doesn't exist yet; the router change is noted as a downstream reference. 6 of 7 tests implemented.
+- Tests (`tests/test_bank_accounts.py`): 6 passed.
+
+### Task A7 — Platform settlement engine — DONE
+
+- `models/settlements.py`, `services/settlements.py`: `run_settlements(period_start, period_end)` aggregates delivered `transport_bookings` (fare; earner resolved via `vehicles/{vehicleId}.ownerId`), completed (`booked`) `equipment_bookings` (priceRupees; owner via equipment), completed `broker_deals` (graceful when absent — **no broker-deals collection exists from prior days**; flagged), grouped by earner; commission percentages read from `platform_config/settlements` (seeded on first read — no hardcoded pcts); doc id `st_{role}_{entityId[:8]}_{periodStart}` — pending rows recomputed on rerun, approved/paid untouched.
+- `routers/jobs.py`: `POST /jobs/settlements/run` — `X-Cron-Secret` checked against `settings.cron_secret` (new `CRON_SECRET` env; empty dev mode allows with a warning); default period = last ISO week (Mon–Sun). `routers/settlements.py`: per-persona lists (transport/equipmentRental/broker; own rows only, newest period first).
+- Tests (`tests/test_settlements.py`): 5 passed.
+
+### Task A8 — Land listings + lease requests + agreement PDF — DONE
+
+- `routers/land_market.py`: `POST /land/listings` (farmLandlord; optional own plotId), `GET /land/listings?near=lat,lng&acres=` (haversine ≤ 25 km, open only), `GET /listings/mine`, `PUT/DELETE /listings/{id}` (owner 403 `NOT_LISTING_OWNER`; leased → 409 `LISTING_HAS_ACTIVE_LEASE`), `POST /land/lease-requests` (farmer; open-only, one pending per farmer per listing → 409s), `GET /lease-requests` (landlord inbox), `accept` (creates the lease from the listing rent + durationMonths, flips listing to `leased`, auto-rejects competing pendings), `reject`.
+- L4: `GET /land/leases/{id}/agreement-pdf` — landlord direct, tenant via phone match (a top-level `land_leases_index/{leaseId}` doc is written at accept so the tenant can resolve the lease — flagged as an addition); `build_lease_agreement_pdf` (Hindi heading `कृषि भूमि पट्टा अनुबंध` + both parties) → Storage upload.
+- Tests (`tests/test_land_market.py`): 6 passed.
+
+### endpoints.md — section 21 appended
+
+Covers all A4 + A8 land routes plus the A5 bank-account and A7 settlement/job routes in the same table format.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest
+189 passed, 34 warnings in 8.92s
+  ...prior days 147 | diary 5 | pnl 5 | finance 7 | land 7 | bank_accounts 6 | settlements 5 | land_market 6
+```
+
+### Blockers / notes
+
+- **`endpoints.md` modified** (section 21) as the day file directs — first doc file change; content follows the established table format.
+- **Validation-error envelope:** added a `RequestValidationError` handler in `main.py` so pydantic Field violations (break-even yield 0, loan limits, bad IFSC, bad pincode) return the conventions §6 envelope instead of FastAPI's default shape. All prior tests still green.
+- **Deviations flagged:** diary PDF Storage dev-mode detection uses "Firebase not initialised" rather than the day file's `firebase_service_account` (our settings key is a path); `land_leases_index` collection for tenant-side lease resolution; `broker_deals` settlement source is provisional (no broker module exists yet); `reportlab==4.2.5` installed cleanly on Python 3.14.
+- Claim-flow `bankAccountLast4` patch is deferred to Day 11 (noted in A5).
+- Live smoke: health 200; 32 new routes registered; PDFs verified valid via `file`.
+
 ## Day 8 — Equipment + FPO (Tasks A1–A4)
 
 **Status: implemented — 147/147 tests passing (24 new).**
