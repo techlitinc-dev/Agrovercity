@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from datetime import date
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 
 from app.core import db
 from app.core.deps import require_roles
@@ -6,6 +9,12 @@ from app.models.advisory import NpkIn, NpkOut, SaturationIn
 from app.services import advisory as advisory_service
 from app.services.disease_model import get_disease_adapter
 from app.services.storage import upload_user_file, validate_upload
+
+
+class SowingIntentIn(BaseModel):
+    crop: str
+    plotId: str | None = None
+    plannedDate: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 router = APIRouter(prefix="/advisory", tags=["advisory"])
 
@@ -63,6 +72,49 @@ def datetime_today() -> str:
     from datetime import date
 
     return date.today().isoformat()
+
+
+@router.post("/sowing-intent", status_code=201)
+async def sowing_intent(body: SowingIntentIn, user: dict = Depends(require_roles("farmer"))):
+    from app.services.consents import ConsentRequiredError, require_data_sharing
+
+    uid = user["id"]
+    try:
+        await require_data_sharing(uid)
+    except ConsentRequiredError:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CONSENT_REQUIRED", "message": "डेटा साझाकरण की सहमति आवश्यक है", "fieldErrors": {}},
+        )
+    if body.plotId:
+        plot = await db.get_subdoc_at(f"users/{uid}/land_plots", body.plotId)
+        if plot is None:
+            raise HTTPException(status_code=404, detail={"code": "PLOT_NOT_FOUND", "message": "Plot not found", "fieldErrors": {}})
+    if body.plannedDate < date.today().isoformat():
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "VALIDATION_ERROR", "message": "plannedDate cannot be in the past", "fieldErrors": {"plannedDate": "cannot be in the past"}},
+        )
+    season = advisory_service.current_season()
+    doc_id = f"{uid}_{body.crop}_{season}"
+    await db.set_doc(
+        "crop_cycles",
+        doc_id,
+        {
+            "id": doc_id,
+            "userId": uid,
+            "crop": body.crop,
+            "plotId": body.plotId,
+            "district": user.get("district", ""),
+            "lat": user.get("farmBoundaryPoints", [{}])[0].get("lat") if user.get("farmBoundaryPoints") else None,
+            "lng": user.get("farmBoundaryPoints", [{}])[0].get("lng") if user.get("farmBoundaryPoints") else None,
+            "season": season,
+            "plannedDate": body.plannedDate,
+            "isIntent": True,
+            "createdAt": datetime_now_iso(),
+        },
+    )
+    return {"recorded": True, "isIntent": True}
 
 
 @router.post("/npk")

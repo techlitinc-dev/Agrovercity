@@ -56,9 +56,13 @@ async def _channel_or_404(channel_id: str) -> dict:
 
 
 @router.get("/channels/{channel_id}/chat")
-async def get_chat(channel_id: str, user: dict = Depends(current_user_id)):
+async def get_chat(channel_id: str, uid: str = Depends(current_user_id)):
     await _channel_or_404(channel_id)
+    from app.services.blocks import list_blocked_ids
+
+    blocked = await list_blocked_ids(uid)
     messages = await db.list_subdocs(_chat_path(channel_id))
+    messages = [m for m in messages if m.get("userId") not in blocked]
     messages.sort(key=lambda m: m.get("sentAt", ""), reverse=True)
     messages = list(reversed(messages[-50:]))
     return {"data": messages, "page": 1, "pageSize": 50, "total": len(messages)}
@@ -97,6 +101,7 @@ async def post_chat(
     message_id = uuid4().hex
     doc = {
         "id": message_id,
+        "userId": uid,
         "userName": user_name,
         "text": body.text,
         "sentAt": datetime.now(timezone.utc).isoformat(),

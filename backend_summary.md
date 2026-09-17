@@ -2,6 +2,68 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 14 — Women, Climate, Post-Harvest, Sync + Admin API (Tasks A1–A9)
+
+**Status: implemented — 369/369 tests passing (72 new).**
+
+### File split (reported per conventions §1.4)
+
+Report/block routes (A5) were split into `routers/users_blocks.py` (would have pushed `users.py` past 300 lines); mounted under `/v1/users` so the paths match the day file exactly.
+
+### Task A1 — Women Farmer hub — DONE
+
+- `routers/women.py` (farmer): `GET /shg` (auto-seeds `users/{uid}/shg/profile` with memberCount 12 / corpus 48500 / loanFund 30000 / monthlyDeposit 500), `POST /shg/deposit` (duplicate month → 409 `DUPLICATE_DEPOSIT_MONTH`; corpus incremented), `GET /home-enterprise` (auto-seeds 3 lines; total computed, not stored).
+- Tests (`tests/test_women.py`): 6 passed.
+
+### Task A2 + A7 — Climate + Post-harvest + cold-storage booking — DONE
+
+- `routers/climate.py` (farmer): `GET /carbon-potential` (acres × 0.92 → CO2e tonnes, ₹2,000/tonne, 3 practices; 5 acres → 4.6 t / ₹9,200 verified), `GET /resilient-varieties?crop=` (6 static varieties incl. Swarna Sub-1/HHB-67, contains-filter).
+- `routers/post_harvest.py`: `GET /cold-storage` (idempotent seed via `data/cold_storage_seed.py`; `availableMT` reduced by `bookedQuintals/10`), `POST /grade` (1–3 images → 422 outside; per-image 415/413 via shared validator; `grading_model` adapter stub returns AGMARK A/88%/12d/₹1,650), `POST /cold-storage/{id}/book` (A7: past date → 422; capacity → 409 `INSUFFICIENT_CAPACITY`; `bookedQuintals` increment; booking in `users/{uid}/cold_storage_bookings`).
+- `GET /users/me/bookings` gains a fourth additive key `coldStorage` (kind-marked, status-filtered).
+- Tests: `test_climate_postharvest.py` 6 passed, `test_cold_storage.py` 5 passed.
+
+### Task A3 + A6 — Offline sync replay + conflict policy — DONE
+
+- `services/sync.py`: `already_processed`/`mark_processed` (`idempotency_keys/{sha256(key)}`), whitelist of 5 replayable POST paths (diary entries, insurance claims metadata-only — photos never replayed, equipment book, vet book, FPO pool join), `dispatch` — duplicate → stored httpStatus; non-POST → 400 `UNSUPPORTED_METHOD`; unwhitelisted → 400 `UNSUPPORTED_PATH`; handlers call service/db layers directly (no HTTP self-calls); HTTPException → per-op error envelope; batch never fails.
+- A6: `SERVER_OWNED_FIELDS` stripped from replayed bodies with a warning log; conflict matrix added to `docs/overview/03` (sync spec section).
+- `routers/sync.py`: `POST /sync` (max 50 ops → 422; `{results, applied, duplicates, errors}`).
+- Tests (`tests/test_sync.py`): 7 passed — idempotency, per-op errors, server-owned stripping (`agriCoinsEarned`/`status` ignored), claim replay forced to `intimated`.
+
+### Task A4 + A9 — Admin API — DONE
+
+- `core/deps.py` gains `admin_user`: verifies the **Firebase ID token** (admin console is the documented exception to the backend-JWT rule) and requires the `admin: true` custom claim → 403 `ADMIN_REQUIRED`. `scripts/make_admin.py` sets the claim.
+- `routers/admin.py`: `POST /login`; `GET /users?persona=` (status default active); `PUT /users/{id}/status` (blocked → `revoke_refresh_tokens`); `GET /rates/pending`, approve (writes into `vyapari_rates`, flips pending, deletes `vyapari_rates:*` Redis keys), reject (reason); content CMS whitelist {news, blogs, videos, workshops, schemes} — create/PUT merge/DELETE, title-or-name validation → 422, unknown collection → 400 `UNKNOWN_COLLECTION`, scheme `eligibilityRules` must be an object → 422 `INVALID_RULES_JSON` (A9 A3); `GET /claims?status=` via collection-group query with userId; `PUT /claims/{userId}/{claimId}` (illegal → 409 `ILLEGAL_STATUS_TRANSITION`; disbursed requires approvedAmount + dbtTransactionId → 422 `DISBURSAL_FIELDS_REQUIRED`; FCM fires inside `advance_status`); `GET /analytics/summary` (users by persona, bookings, orders GMV, claims by status, pending rates; 60 s Redis cache `admin:analytics`).
+- A9 pack: KYC queue (`GET /admin/kyc/pending` over vehicle/equipment `docStatus: pending`; verify/reject with reason; 404 `KYC_ENTITY_NOT_FOUND` — reconciled onto the Day 7/8 `docStatus` field rather than a new `kycStatus`), broadcast (`SEGMENT_REQUIRED` validation, dry-run count, per-user `fcm.send_to_user` with broadcast deepLink), settlements console (`approve` pending→approved, `mark_paid` approved→paid with `paidAt`; illegal → 409), moderation (`GET /admin/reports`, resolve dismiss/block — block also flips the reported user to blocked + revokes tokens).
+- Tests (`tests/test_admin.py`): 16 passed (10 + 6).
+
+### Task A5 — Report / block users (X9) — DONE
+
+- `services/blocks.py`: `blocked_pair` (bidirectional), `list_blocked_ids`.
+- `routers/users_blocks.py`: `POST /users/{id}/report` (self → 400 `CANNOT_REPORT_SELF`; open dup → 409 `ALREADY_REPORTED`; `reports/{uuid}`), `POST/GET /users/me/blocks`, `DELETE /users/me/blocks/{id}` (204 idempotent).
+- Channel chat GET drops messages from blocked authors.
+- Tests (`tests/test_blocks.py`): 4 passed.
+
+### Task A8 — Sowing intent with consent gate (F6) — DONE
+
+- `POST /advisory/sowing-intent` (farmer): `require_data_sharing` → 403 `CONSENT_REQUIRED`; own-plot 404; past date → 422; upserts `crop_cycles/{uid}_{crop}_{season}` with `isIntent: true` — feeds saturation counts (test asserts sowingCount ≥ 1).
+- Tests: 3 added to `tests/test_advisory.py` (8 total).
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest
+369 passed, 37 warnings in 12.69s
+  ...prior days 297 | women 6 | climate_postharvest 6 | sync 7 | admin 16
+  blocks 4 | cold_storage 5 | advisory 8 (was 5)
+```
+
+### Blockers / notes
+
+- **`users_blocks.py` split** from users.py per the 300-line convention; routes mounted under `/v1/users` so paths match the day file.
+- **KYC field reconciliation:** Day 7/8 entities already carry `docStatus`; the admin KYC queue operates on `docStatus` instead of introducing a duplicate `kycStatus` (flagged).
+- **No transporter list endpoint exists** (Day 7 shipped none), so the A6 provider-rating join covers equipment + vets lists and `GET /ratings/providers/{id}`.
+- Live smoke: health 200; 33 new paths registered; unauthed `/v1/women/shg` and `/v1/admin/users` → 401 envelope.
+
 ## Day 13 — Chatbot, Advisory, Gamification, FCM (Tasks A1–A8)
 
 **Status: implemented — 333/333 tests passing (36 new).**

@@ -23,7 +23,7 @@ def risk_level(count: int) -> str:
 async def saturation(inp: SaturationIn, exclude_uid: str | None = None) -> SaturationOut:
     cycles = await db.query("crop_cycles", [("crop", "==", inp.crop), ("district", "==", inp.district)], limit=10000)
     if exclude_uid:
-        cycles = [c for c in cycles if c.get("userId") != exclude_uid]
+        cycles = [c for c in cycles if not (c.get("userId") == exclude_uid and not c.get("isIntent"))]
     count = len(cycles)
     level = risk_level(count)
     base = BASE_PRICES.get(inp.crop.lower(), DEFAULT_BASE)

@@ -1407,3 +1407,17 @@ Fan-out via the notification pipeline (topic-per-district + persona filter); del
 | `settlement_run` | Monday 04:00 | X10 — materialize `settlements` docs for the closed week |
 | `coins_reconcile` | nightly 03:30 | X11 — ledger vs balance drift check → `admin_audit` |
 | `booking_request_expiry` | hourly | T2/E2 — expire stale `requested`/`pending` bookings, release slots |
+
+---
+
+## Sync conflict-resolution matrix (X19 — Day 14)
+
+`POST /v1/sync` replays only whitelisted POST paths (`/v1/diary/entries`, `/v1/insurance/claims`, `/v1/equipment/slots/{id}/book`, `/v1/vets/{id}/book`, `/v1/fpo/pools/{id}/join`). Server-owned fields are stripped from replayed bodies before the handler runs; claim photos are never replayed (bodies carry already-uploaded Storage URLs).
+
+| Collection / fields | Policy | Notes |
+|---|---|---|
+| diary_entries | client-wins on content fields; server-wins on `agriCoinsEarned` | coins computed server-side |
+| insurance claims (metadata) | server-wins on `status`, `approvedAmount`, `timeline`, `bankAccountLast4` | client edits limited to submit-time fields |
+| wallet / `agriCoins` balance | server-wins always | ledger is the source of truth |
+| equipment/vet bookings | server-wins on `status`, `priceRupees` | slot conflicts decided by the engine |
+| profile (`users/me`) | last-write-wins on name/village/crops; server-wins on `kisanCreditScore`, `kccLimit`, `agriCoins` | |

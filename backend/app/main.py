@@ -10,11 +10,13 @@ from app.core.config import settings
 from app.core.firebase import init_firebase
 from app.routers import (
     addresses,
+    admin,
     app_config,
     auth,
     advisory,
     bank_accounts,
     chatbot,
+    climate,
     contracts,
     content,
     diary,
@@ -37,6 +39,7 @@ from app.routers import (
     notifications,
     orders,
     pnl,
+    post_harvest,
     ratings,
     referrals,
     reference,
@@ -46,12 +49,15 @@ from app.routers import (
     soil_tests,
     speech,
     support,
+    sync,
     transport,
     tree,
     users,
+    users_blocks,
     vault,
     water,
     weather,
+    women,
 )
 from app.routers.users import devices_router
 
@@ -108,6 +114,12 @@ app.include_router(referrals.router, prefix="/v1")
 app.include_router(notifications.router, prefix="/v1")
 app.include_router(support.router, prefix="/v1")
 app.include_router(speech.router, prefix="/v1")
+app.include_router(sync.router, prefix="/v1")
+app.include_router(women.router, prefix="/v1")
+app.include_router(climate.router, prefix="/v1")
+app.include_router(post_harvest.router, prefix="/v1")
+app.include_router(users_blocks.router, prefix="/v1")
+app.include_router(admin.router, prefix="/v1")
 
 
 @app.exception_handler(HTTPException)

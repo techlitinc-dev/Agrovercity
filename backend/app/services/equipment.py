@@ -20,6 +20,7 @@ DEFAULT_SLOTS = [
 SLOT_TEMPLATE_KEYS = {"slotName", "duration", "priceRupees", "recommendedTask"}
 BOOKING_COINS = 50
 CANCEL_WINDOW = timedelta(hours=2)
+MAX_SLOTS_PER_DAY = 2
 
 
 def today_ist() -> date:

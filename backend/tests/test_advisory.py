@@ -99,3 +99,52 @@ async def test_npk_deficit_math(client, fake_firebase, fake_users, fake_db):
     assert body["dapKgPerAcre"] > 0
     assert body["mopKgPerAcre"] > 0
     assert body["recommendations"]
+
+
+async def test_intent_recorded_with_flag(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users)
+    await client.put(
+        "/v1/users/me/consents",
+        json={"dataSharing": True, "location": True, "marketing": False},
+        headers=_auth_header(access),
+    )
+    resp = await client.post(
+        "/v1/advisory/sowing-intent",
+        json={"crop": "wheat", "plannedDate": "2026-11-01"},
+        headers=_auth_header(access),
+    )
+    assert resp.status_code == 201
+    assert resp.json() == {"recorded": True, "isIntent": True}
+    season = current_season()
+    assert fake_db["crop_cycles"][f"uid-1_wheat_{season}"]["isIntent"] is True
+
+
+async def test_intent_without_consent_403(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users)
+    resp = await client.post(
+        "/v1/advisory/sowing-intent",
+        json={"crop": "wheat", "plannedDate": "2026-11-01"},
+        headers=_auth_header(access),
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "CONSENT_REQUIRED"
+
+
+async def test_intent_feeds_saturation_count(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users)
+    await client.put(
+        "/v1/users/me/consents",
+        json={"dataSharing": True, "location": True, "marketing": False},
+        headers=_auth_header(access),
+    )
+    await client.post(
+        "/v1/advisory/sowing-intent",
+        json={"crop": "wheat", "plannedDate": "2026-11-01"},
+        headers=_auth_header(access),
+    )
+    resp = await client.post(
+        "/v1/advisory/saturation",
+        json={"crop": "wheat", "district": "", "lat": 20.0, "lng": 73.8, "shareSowingIntent": False},
+        headers=_auth_header(access),
+    )
+    assert resp.json()["sowingCount"] >= 1
