@@ -2,6 +2,61 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 15 — Hardening + Deploy (Tasks A1–A5)
+
+**Status: implemented — 378/378 tests passing (9 new); smoke 28/28 local (SKIP-aware); deploy steps documented but blocked on cloud credentials.**
+
+### Task A1 — Rate limiting + structured logging middleware — DONE
+
+- `app/middleware/rate_limit.py`: `RateLimitMiddleware` — skips `/v1/health`, `/docs`, `/openapi.json`, `/redoc`; identity `u:{sub}` (cheap unverified JWT decode) or `ip:{host}`; key `rl:{identity}:{minute}` INCR + EXPIRE 70; >100 → 429 `RATE_LIMITED` envelope + `Retry-After`; Redis failure → fail-open with warning.
+- `app/middleware/logging.py`: `LoggingMiddleware` — one JSON line per request via the `api` logger (`python-json-logger` JsonFormatter): `{ts, method, path, status, durationMs, uid, requestId}`; sets `X-Request-Id` response header; **no request/response bodies ever logged**. Verified live: two JSON lines with `requestId` and `durationMs` in the uvicorn output.
+- Registered in `main.py` with logging outermost (sees rate-limit 429s). `python-json-logger==2.0.7` added to requirements.
+- Rate-limit counters cleared per test by an autouse conftest fixture (prevents cross-test 429 pollution).
+- Tests (`tests/test_middleware.py`): 4 passed — 101st request 429, health never limited, `X-Request-Id` present, fail-open on Redis outage.
+
+### Task A2 — Error-envelope audit — DONE
+
+- `main.py` handlers now cover everything: HTTPException dicts → envelope (Day 2), `RequestValidationError` → 422 `VALIDATION_ERROR` with fieldErrors (Day 9), `Exception` → 500 `INTERNAL_ERROR` "Something went wrong" with server-side stack trace only, and `InsufficientCoins` → 409 `INSUFFICIENT_COINS` पर्याप्त कॉइन नहीं.
+- Audit result: all router raises use the `detail={"code", "message", "fieldErrors"}` shape (the envelope handler converts them); bare-string details: none found.
+- Tests (`tests/test_error_envelope.py`): 5 passed — 422/404/409/429/500 all envelope-shaped; the 500 test uses `raise_app_exceptions=False` on the ASGI transport (Starlette's Exception handler lives in the outermost middleware).
+
+### Task A3 — Firestore rules + indexes — DONE (files; deploy blocked)
+
+- `infra/firestore.rules`: deny-all for clients (Admin SDK bypasses — architecture assumption proven: full suite green while the rules deny everything).
+- `infra/firestore.indexes.json`: 5 composite indexes — insurance_claims COLLECTION_GROUP (status ASC + submittedAt DESC), diary_entries (type+date), orders (userId+createdAt), vyapari_rates_pending (status+createdAt), transport_bookings (userId+date).
+- `infra/README.md`: deploy + verify commands (`firebase deploy --only firestore:rules,firestore:indexes`).
+- **Deploy blocked:** no Firebase project/CLI credentials in this environment. Grep audit clean — no client `cloud_firestore` dependency.
+
+### Task A4 — Cloud Run deploy + smoke script — DONE (script; deploy blocked)
+
+- `backend/Dockerfile` — exactly per `docs/deployment/backend-deploy.md` §2 (python:3.12-slim, uvicorn 8080, 2 workers); `backend/.dockerignore` added.
+- `scripts/smoke_test.py` — 15 baseline checks per the day file (health, refresh, users/me, mandi, weather, diary +15, pnl, schemes, credit score, policies, chatbot, gamification, news, admin analytics) with `SMOKE_REFRESH_TOKEN`/`SMOKE_ADMIN_TOKEN` env inputs and SKIP semantics.
+- **Deploy steps (Secret Manager, gcloud builds/deploys, domain mapping, live smoke run, rollback rehearsal) are blocked in this environment** — no gcloud/Firebase credentials. The runbook in `docs/deployment/backend-deploy.md` is executable as written once credentials exist.
+
+### Task A5 — Extended smoke (P0 flows + coverage gate) — DONE
+
+- Smoke extended to 26 checks: app-config fields (X12), referral invite (409-tolerant), bank account + stub verify (F16), lots CRUD (F7), order cancel + refund (X5), transport accept (T2), equipment approve (E2), settlements job (X10), consents (X17), claim appeal (F15), KYC verify + broadcast dry-run (A1/A4) — each with the day-file SKIP semantics for missing env tokens.
+- Endpoint-coverage gate: parses `endpoints.md` + `docs/overview/03` for `METHOD /v1/...` rows and asserts each normalized path exists in the live `/openapi.json`; misses print `COVERAGE MISS` and fail the run.
+- **Local run: `SMOKE: 28/28 passed`** (26 checks + sub-assertions + coverage gate, with SKIPs where env tokens are unset — no Firestore credentials here).
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest
+378 passed, 37 warnings in 17.55s
+  ...prior days 333 | middleware 4 | error_envelope 5
+$ .venv/bin/python scripts/smoke_test.py http://localhost:8000
+SMOKE: 28/28 passed  (SKIP-aware; coverage gate green)
+```
+
+### Blockers / notes
+
+- **Cloud credentials absent** — Cloud Run deploy, Firestore rules/indexes deploy, hosting deploys, and the live 15/15→26/26 smoke against `api.agrovercity.in` remain operator steps; all artifacts (Dockerfile, .dockerignore, smoke script, rules, indexes, infra README) are committed and the runbooks are in `docs/deployment/`.
+- **`app-config` fail-open:** when Firestore is unreachable the endpoint now serves default config (`minSupportedVersion: 1.0.0`, no force-update) instead of 500, matching the Day 3 client fail-open philosophy. A missing doc still returns 404 `APP_CONFIG_MISSING` (Day 1 test intact).
+- **`Exception` handler testability:** httpx's ASGITransport re-raises app exceptions by default; the 500-envelope test uses `raise_app_exceptions=False` (the handler itself is Starlette's outermost ServerErrorMiddleware).
+- Log redaction audit clean: no logger calls in vault/land-records routers; the logging middleware never touches bodies.
+- Live smoke: health 200; JSON request logs with `requestId`/`durationMs` verified; 429 + Retry-After verified.
+
 ## Day 14 — Women, Climate, Post-Harvest, Sync + Admin API (Tasks A1–A9)
 
 **Status: implemented — 369/369 tests passing (72 new).**

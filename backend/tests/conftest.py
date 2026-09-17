@@ -5,16 +5,24 @@ import firebase_admin.auth as fb_auth
 import httpx
 import pytest
 
+from app.core import cache as cache_mod
 from app.core import db
 from app.main import app
 from app.services import users as users_service
 
 
 @pytest.fixture(autouse=True)
-def _reset_redis_global():
+async def _reset_redis_global():
+    # clear rate-limit counters from the previous test (best effort)
+    try:
+        redis = await cache_mod.get_redis()
+        keys = await redis.keys("rl:*")
+        print("RLCLEAR", keys)
+        if keys:
+            await redis.delete(*keys)
+    except Exception as e:
+        print("RLCLEAR-ERR", repr(e))
     yield
-    import app.core.cache as cache_mod
-
     cache_mod._redis = None
 
 

@@ -23,7 +23,17 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 
 @router.get("/app-config")
 async def get_app_config(version: str | None = None, platform: str | None = None) -> AppConfigOut:
-    doc = await get_doc(APP_CONFIG_COLLECTION, APP_CONFIG_DOC)
+    try:
+        doc = await get_doc(APP_CONFIG_COLLECTION, APP_CONFIG_DOC)
+    except Exception:
+        # Firestore unreachable — fail open with defaults so clients are never bricked.
+        doc = {"minSupportedVersion": "1.0.0", "forceUpdate": False, "featureFlags": {}, "maintenanceMode": False}
+        return AppConfigOut(
+            minSupportedVersion=doc["minSupportedVersion"],
+            forceUpdate=doc["forceUpdate"],
+            featureFlags=doc["featureFlags"],
+            maintenanceMode=doc["maintenanceMode"],
+        )
     if doc is None:
         raise HTTPException(
             status_code=404,

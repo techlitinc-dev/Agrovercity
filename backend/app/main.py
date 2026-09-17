@@ -121,6 +121,13 @@ app.include_router(post_harvest.router, prefix="/v1")
 app.include_router(users_blocks.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 
+# middleware: last-added runs outermost — logging must see rate-limit 429s
+from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.logging import LoggingMiddleware
+
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(LoggingMiddleware)
+
 
 @app.exception_handler(HTTPException)
 async def error_envelope_handler(request: Request, exc: HTTPException):
@@ -139,6 +146,30 @@ async def validation_envelope_handler(request: Request, exc: RequestValidationEr
     return JSONResponse(
         status_code=422,
         content={"error": {"code": "VALIDATION_ERROR", "message": "Validation failed", "fieldErrors": field_errors}},
+    )
+
+
+@app.exception_handler(Exception)
+async def internal_error_handler(request: Request, exc: Exception):
+    import logging
+
+    logging.getLogger(__name__).error(
+        "Unhandled error on %s %s", request.method, request.url.path, exc_info=exc
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "INTERNAL_ERROR", "message": "Something went wrong", "fieldErrors": {}}},
+    )
+
+
+from app.services.coins import InsufficientCoins
+
+
+@app.exception_handler(InsufficientCoins)
+async def insufficient_coins_handler(request: Request, exc: InsufficientCoins):
+    return JSONResponse(
+        status_code=409,
+        content={"error": {"code": "INSUFFICIENT_COINS", "message": "पर्याप्त कॉइन नहीं", "fieldErrors": {}}},
     )
 
 
