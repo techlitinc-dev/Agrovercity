@@ -2,6 +2,57 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 5 — Mandi (Tasks A1–A5)
+
+**Status: implemented — 71/71 tests passing (24 new).**
+
+### Task A1 — /v1/mandi/prices + /v1/mandi/list + seed script — DONE
+
+- `backend/app/models/mandi.py`: `MandiPriceOut` (id, mandiName, distanceKm, commodity, variety, min/max/modal/msp, trend, changePercent, arrivalsQuintals, updatedAt), `VyapariRateOut`, `CompareResultItem`, `SellerRateRequest`.
+- `scripts/seed_mandi.py`: seeds 4 `mandi_prices` (Pimpalgaon/Nashik Dindori/Lasalgaon/Vashi with the day-file prices), 4 `mandis` (district/state/approx coords), 3 `vyapari_rates`, and 360 `mandi_price_history` rows (A5). Data constants are imported by tests — single source of truth.
+- `backend/app/routers/mandi.py` (prefix `/mandi`, roles farmer/seller/broker via the new `require_roles` dependency in `core/deps.py`): `GET /prices` (crop contains-match on the English part, case-insensitive; optional district filter; pagination envelope `{data, page, pageSize, total}`, pageSize clamped to 50), `GET /list` (`{data: [...]}` from `mandis`).
+- Tests (`tests/test_mandi.py`): 4 passed — all 4 in envelope, tomato filter → 3 with no Onion, transport activeProfile → 403 `FORBIDDEN_ROLE`, mandi list.
+
+### Task A2 — /v1/mandi/vyapari-rates + compare + seller rate posting — DONE
+
+- `GET /mandi/vyapari-rates?crops=`: Redis cache key `vyapari_rates:{crops|all}` TTL 7200 s; response `{data: [...], cachedAt}`; comma-separated crop filter.
+- `GET /mandi/compare?crop=&quantityQuintals=&lat=&lng=`: transportCost = distanceKm × ₹12/km; netProfit = modalPrice × quantity − transportCost; sorted by netProfit desc; 422 `INVALID_QUANTITY` when quantity ≤ 0.
+- `backend/app/routers/seller.py` (role seller): `POST /rates` → `vyapari_rates_pending` doc `{crop, ratePerKg, mandiName, sellerId, status: "pending", createdAt}`; `GET /rates/my` → this seller's pending+approved rates. Cache invalidation only on approval (out of scope — commented).
+- Tests (`tests/test_vyapari.py`): shape (3 rates, valid changeDir), Redis cache counter (2 calls → 1 query, in-memory cache patch), compare ranking + transportCost check, invalid quantity 422, seller post pending + rates/my, farmer → 403.
+
+### Task A3 — Produce lots CRUD (/v1/market/lots) — DONE
+
+- `backend/app/models/lots.py`: `LotRequest` (crop, quantityQuintals > 0, expectedRate int ≥ 0, harvestDate, photos[], location) + `LotOut` (id, farmerId, status, createdAt).
+- `backend/app/routers/lots.py` (role farmer): `POST /lots` → 201 with `status: "open"`; `GET /lots?status=&page=&pageSize=` → caller's own lots only, envelope; `PUT /lots/{id}` → owner-only (404 `LOT_NOT_FOUND`), sold → 409 `LOT_NOT_EDITABLE`; `DELETE /lots/{id}` → soft-withdraw (record kept; sold → 409); returns `{ok: true, status: "withdrawn"}`.
+- Tests (`tests/test_lots.py`): 6 passed — create, own-only list, update, withdraw + status filters, other farmer's lot 404, sold lot PUT/DELETE 409.
+
+### Task A4 — Rate sanity band on POST /v1/seller/rates — DONE
+
+- Before storing: `ratePerKg × 100` compared against the reference `modalPrice` from `mandi_prices` (crop contains-match; mandiName loose-match preferred, else any doc for the crop). Outside ±25% → 422 `RATE_OUT_OF_BAND` with `fieldErrors: {"ratePerKg": "मंडी भाव ₹<modal> के ±25% सीमा से बाहर"}`. No reference for the crop → accepted (coverage gap handled by the admin moderation queue, Day 14 A6 — commented).
+- Tests: 4 added — within band (₹2400/q vs ₹1950 modal) accepted, ₹4000/q and ₹1000/q rejected, unknown crop (Dragonfruit) accepted.
+
+### Task A5 — GET /v1/mandi/prices/history + 90-day synthetic seed — DONE
+
+- `build_history_rows()` in the seed script: 90 daily docs per mandi (360 total), deterministic `random.Random(42)` walk (±5%), anchored so day 90 equals the current `modalPrice`; one-line TODO for real Agmarknet backfill.
+- `GET /mandi/prices/history?crop=&mandi=&months=`: crop/mandi matching as in `/prices` (substring on mandiName); missing crop or mandi → 422 `VALIDATION_ERROR` with fieldErrors; months clamped silently to 1–36; returns `{data: [{date, modalPrice}]}` ascending, last `months × 30` days.
+- Tests (`tests/test_mandi_history.py`): 4 passed — 90 ascending points default, 30 for months=1, unknown crop → empty, missing params 422.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest -v
+71 passed, 2 warnings in 5.85s
+  app_config 4 | auth 5 | infra 3 | mpin 5 | users 6 | profiles 6 | referral 4
+  role_profiles 5 | reference 6 | weather 3 | mandi 4 | vyapari 10 | lots 6 | history 4
+```
+
+### Blockers / notes
+
+- **Seed script blocked on Firestore credentials** (same as Day 1) — `DefaultCredentialsError`; the script and its data are verified via the test suite, which imports the seed constants directly. Rerun `scripts/seed_mandi.py` once credentials exist.
+- **`require_roles(*roles)` added to `core/deps.py`** (the conventions §9 pattern) — it loads the user and checks `activeProfile`, returning the user dict so routers have uid + profile in one dependency. Day 3's inline `require_role(user, *roles)` helper remains in users.py for its endpoints.
+- Live smoke: health 200, all 9 new routes registered in OpenAPI, unauthed `/mandi/prices` and `POST /market/lots` → 401 envelope.
+- `changePercent` stays a display string (`"+8.4%"`) per the day-file model — numeric parsing is a client concern for now.
+
 ## Day 4 — Reference data + weather (Tasks A1–A2)
 
 **Status: implemented — 47/47 tests passing (9 new).**
