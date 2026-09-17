@@ -21,7 +21,17 @@ async def list_equipment(type: str | None = None, lat: float | None = None, lng:
     docs = [d for d in docs if d.get("active", True) and d.get("docStatus") == "verified"]
     if type:
         docs = [d for d in docs if d.get("type") == type]
+    docs = [{**d, **await _provider_rating(d.get("ownerId"))} for d in docs]
     return {"data": docs}
+
+
+async def _provider_rating(owner_id: str | None) -> dict:
+    if not owner_id:
+        return {"ratingAvg": None, "ratingCount": 0}
+    agg = await db.get_doc("provider_ratings", owner_id)
+    if agg is None:
+        return {"ratingAvg": None, "ratingCount": 0}
+    return {"ratingAvg": agg.get("ratingAvg"), "ratingCount": agg.get("ratingCount", 0)}
 
 
 @router.get("/{equipment_id}/slots")

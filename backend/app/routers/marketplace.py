@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core import db
 from app.core.deps import require_roles
 from app.models.marketplace import CartItemRequest, CartItemUpdateRequest
+from app.models.reviews import ReviewIn, ReviewOut
 
 router = APIRouter(tags=["marketplace"])
 
@@ -128,3 +129,49 @@ async def remove_cart_item(product_id: str, user: dict = Depends(require_roles(*
     items.pop(product_id, None)
     await _save_cart(user["id"], items)
     return await _cart_payload(user["id"])
+
+
+@router.get("/products/{product_id}/reviews")
+async def list_reviews(product_id: str, page: int = 1, pageSize: int = 20, user: dict = Depends(require_roles(*MARKETPLACE_ROLES))):
+    product = await db.get_doc("products", product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PRODUCT_NOT_FOUND", "message": "Product not found", "fieldErrors": {}},
+        )
+    reviews = await db.list_subdocs(f"products/{product_id}/reviews")
+    reviews.sort(key=lambda r: r.get("updatedAt", ""), reverse=True)
+    total = len(reviews)
+    page_size = max(1, min(pageSize, 50))
+    start = (max(1, page) - 1) * page_size
+    return {"data": reviews[start : start + page_size], "page": page, "pageSize": page_size, "total": total}
+
+
+@router.post("/products/{product_id}/reviews")
+async def post_review(product_id: str, body: ReviewIn, user: dict = Depends(require_roles(*MARKETPLACE_ROLES))):
+    product = await db.get_doc("products", product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "PRODUCT_NOT_FOUND", "message": "Product not found", "fieldErrors": {}},
+        )
+    uid = user["id"]
+    reviews_path = f"products/{product_id}/reviews"
+    existing = await db.get_subdoc_at(reviews_path, uid)
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": uid,
+        "userId": uid,
+        "userName": user.get("name") or "Farmer",
+        "rating": body.rating,
+        "comment": body.comment,
+        "createdAt": (existing or {}).get("createdAt", now),
+        "updatedAt": now,
+    }
+    await db.set_subdoc_at(reviews_path, uid, doc)
+
+    reviews = await db.list_subdocs(reviews_path)
+    product["ratingCount"] = len(reviews)
+    product["ratingAvg"] = round(sum(r.get("rating", 0) for r in reviews) / len(reviews), 1) if reviews else None
+    await db.set_doc("products", product_id, product)
+    return ReviewOut(**doc)

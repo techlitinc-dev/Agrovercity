@@ -2,6 +2,63 @@
 
 Status tracker for Dev A (backend) work, day by day.
 
+## Day 12 — Content, Gyan Hub, Livestock, Tree + Reviews/Ratings (Tasks A1–A6)
+
+**Status: implemented — 297/297 tests passing (38 new).**
+
+### Task A1 — News + live channels + chat — DONE
+
+- `models/content.py` (AgriNewsItem/AgriLiveChannel/ChatMessageIn/ChatMessageOut), `data/content_seed.py` — 6 news (1 breaking, Hindi audioText) + 4 channels (DD Kisan, KVK Live, Nashik APMC Auction, Maharashtra Agri TV; shared HLS m3u8 test stream; 2 live). **Seed values are stand-ins** (prototype absent — flagged).
+- `routers/content.py` (all roles): `GET /news` (breaking first then timestamp desc; category filter), `GET /channels` (liveViewersCount overridden from Redis `channel:{id}:viewers`, Firestore fallback), `GET /channels/{id}/chat` (latest 50 ascending; 404 `CHANNEL_NOT_FOUND`), `POST /channels/{id}/chat` (2-second Redis SET-NX rate limit → 429 `CHAT_RATE_LIMITED`; `?joined=`/`?left=` INCR/DECR floored at 0).
+- Tests (`tests/test_content.py`): 6 passed (viewer counts and rate-limit keys cleaned per test).
+
+### Task A2 — Gyan Hub — DONE
+
+- `services/coins.py` gains `InsufficientCoins` + `spend_coins` (negative ledger entry).
+- `models/gyan.py` + `data/gyan_seed.py` (3 workshops — ws-1 ICAR-certified 380/500 seats fee 499 discount-cap 200; 3 expert talks with 1 live; 6 videos; 6 blogs — stand-in values).
+- `routers/gyan.py`: `GET /workshops` (per-user `isEnrolled` from `users/{uid}/workshop_enrollments`), `POST /workshops/{id}/enroll` (409 `WORKSHOP_FULL`/`ALREADY_ENROLLED`; coin cap validation → 422 `INVALID_COIN_AMOUNT`; `spend_coins` failure → 409 `INSUFFICIENT_COINS` पर्याप्त कॉइन नहीं; coins-only → 201 `{enrolled: true}`; partial → 200 with dev Razorpay `paymentOrderId` + `amountDue` and `awaiting_payment` enrollment), `GET /expert-talks` + register (+25 coins, 409 `ALREADY_REGISTERED`) + questions (201), `GET /videos?category=`, `GET /blogs` (per-user `isBookmarked`), bookmark toggle, idempotent like (likesCount +1 once).
+- Tests (`tests/test_gyan.py`): 10 passed (day file listed 9 checks; added a `spend_coins` insufficient unit test).
+
+### Task A3 — Livestock — DONE
+
+- `models/livestock.py` + `data/livestock_seed.py`: 3 Nashik gaushalas (manure/adoption badges), 3 nurseries (1 govt-certified), 4 vets (2 emergency, 1 non-farm-visit, fees 300–800), 6 dairy products (1 out of stock).
+- `routers/livestock.py`: `GET /gaushalas?district=`, `POST /gaushalas/{id}/manure-order` (201 `{orderId, status: "placed"}`), `GET /nurseries` (distance-sorted), `GET /vets?emergency=` (2 emergency, distance-sorted), `POST /vets/{id}/book` (400 `FARM_VISIT_UNAVAILABLE` for the non-farm vet; writes `users/{uid}/vet_bookings` in the Day-11 shape), `GET /dairy-products?category=`, `POST /dairy-products/{id}/order` (409 `OUT_OF_STOCK`; qty 2 × ₹450 → total 900), `POST /vets/bookings/{id}/complete` (A6 completion transition).
+- Tests (`tests/test_livestock.py`): 7 passed — incl. the Day-11 integration (vet booking appears in `GET /v1/users/me/bookings` vet list).
+
+### Task A4 — Tree plantation — DONE
+
+- `models/tree.py` + `data/tree_seed.py`: 4 articles, 3 NGOs (1 free saplings), 4 biofuel trees (Jatropha/Pongamia/Neem/Mahua with realistic oil %, returns, subsidy schemes), 5 care guides (steps 1–5).
+- `routers/tree.py` (farmer/farmLandlord/seller): articles with category filter, NGOs, biofuel, care-guides sorted by stepNumber, `POST /ngos/{id}/sapling-request` (404 `NGO_NOT_FOUND`; count 1–500 → 422 over).
+- Tests (`tests/test_tree.py`): 4 passed.
+
+### Task A5 — Product reviews (X7) — DONE
+
+- `models/reviews.py`; marketplace router gains `GET/POST /products/{id}/reviews` — doc id = reviewer uid (one-per-user upsert), `createdAt` preserved on update, `updatedAt` always; product aggregate `ratingCount`/`ratingAvg` recomputed on write (additive fields).
+- Tests (`tests/test_reviews.py`): 5 passed.
+
+### Task A6 — Service ratings (X8) — DONE
+
+- `models/ratings.py`, `routers/ratings.py`: `POST /ratings` resolves the booking by kind (transport top-level with vehicle→owner provider; vet/equipment subcollections), foreign booking → 404 `BOOKING_NOT_FOUND`, non-terminal → 409 `NOT_COMPLETED` (transport `delivered`, vet `completed`, equipment `booked`), one rating per booking → 409 `ALREADY_RATED`; provider aggregate `provider_ratings/{providerId}` recomputed.
+- Provider joins: `GET /v1/equipment` and `GET /v1/vets` include additive `ratingAvg`/`ratingCount`. **No transporter list endpoint exists** (Day 7 shipped none) — the transport provider join is available via `GET /ratings/providers/{id}` instead; flagged.
+- `POST /vets/bookings/{id}/complete` added to livestock router so the vet rating rule is testable end-to-end.
+- Tests (`tests/test_ratings.py`): 6 passed.
+
+### Test run (final)
+
+```
+$ cd backend && .venv/bin/pytest
+297 passed, 36 warnings in 12.34s
+  ...prior days 259 | content 6 | gyan 10 | livestock 7 | tree 4 | reviews 5 | ratings 6
+```
+
+### Blockers / notes
+
+- **Seed values are stand-ins** for content/gyan/livestock/tree (prototype absent) — flagged as on prior days; all 6 seed functions are idempotent and wired into startup behind the credentials-safe try/except.
+- **Redis required for content tests** — viewer counts and the chat rate limit use the live local Redis; keys are cleaned per test.
+- Enroll status codes per day file: coins-only 201, partial 200; implemented with an explicit JSONResponse.
+- `next_claim_number`-style counter note from Day 11 applies to no new code today; ratings aggregate recomputes from full scans (fine at v1 scale).
+- Live smoke: health 200; 28 new paths registered; unauthed `/v1/news` → 401 envelope.
+
 ## Day 11 — Crop Insurance + My Bookings (Tasks A1–A5)
 
 **Status: implemented — 259/259 tests passing (29 new).**
