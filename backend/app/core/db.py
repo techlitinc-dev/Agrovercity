@@ -1,17 +1,42 @@
 from typing import Any
 
+from datetime import datetime, timezone
+from pathlib import Path
+
 from google.cloud import firestore
+from google.oauth2 import service_account
 
 from app.core.config import settings
 
 # Firestore approach: google.cloud.firestore.AsyncClient — no Firebase Admin init needed for Firestore.
+# Credentials: the service-account JSON (ADC fallback if the file is absent).
 _client: firestore.AsyncClient | None = None
+
+_SCOPES = [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/datastore",
+]
+
+
+def _credentials():
+    path = Path(settings.firebase_service_account_path)
+    if path.exists():
+        return service_account.Credentials.from_service_account_file(
+            str(path), scopes=_SCOPES
+        )
+    return None
 
 
 def get_db() -> firestore.AsyncClient:
     global _client
     if _client is None:
-        _client = firestore.AsyncClient(project=settings.firebase_project_id)
+        creds = _credentials()
+        if creds is not None:
+            _client = firestore.AsyncClient(
+                project=settings.firebase_project_id, credentials=creds
+            )
+        else:
+            _client = firestore.AsyncClient(project=settings.firebase_project_id)
     return _client
 
 
