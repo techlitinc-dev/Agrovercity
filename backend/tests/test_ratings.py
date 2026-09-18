@@ -144,3 +144,20 @@ def create_access_token_local(uid: str) -> str:
     from app.services.tokens import create_access_token
 
     return create_access_token(uid)
+
+
+async def test_provider_rating_aggregate_lookup(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users)
+    fake_db["provider_ratings"]["uid-2"] = {"ratingAvg": 4.5, "ratingCount": 2, "updatedAt": "2026-09-17T00:00:00Z"}
+
+    resp = await client.get("/v1/ratings/providers/uid-2", headers=_auth_header(access))
+    assert resp.status_code == 200
+    assert resp.json() == {"ratingAvg": 4.5, "ratingCount": 2}
+
+
+async def test_provider_rating_unrated_returns_zeroes(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users)
+
+    resp = await client.get("/v1/ratings/providers/uid-42", headers=_auth_header(access))
+    assert resp.status_code == 200
+    assert resp.json() == {"ratingAvg": None, "ratingCount": 0}

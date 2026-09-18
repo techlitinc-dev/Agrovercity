@@ -96,3 +96,26 @@ async def test_dairy_order_total(client, fake_firebase, fake_users, fake_db):
     resp = await client.post("/v1/dairy-products/dairy-3/order", json={"quantity": 2}, headers=_auth_header(access))
     assert resp.status_code == 201
     assert resp.json() == {"orderId": resp.json()["orderId"], "total": 900}
+
+
+async def test_nurseries_sorted_by_distance(client, fake_firebase, fake_users, fake_db):
+    await seed_livestock()
+    access = await _login(client, fake_users)
+    resp = await client.get("/v1/nurseries", headers=_auth_header(access))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 3
+    distances = [d["distanceKm"] for d in body["data"]]
+    assert distances == sorted(distances)
+    assert body["data"][0]["id"] == "nur-1"
+
+
+async def test_nurseries_pagination(client, fake_firebase, fake_users, fake_db):
+    await seed_livestock()
+    access = await _login(client, fake_users)
+    resp = await client.get("/v1/nurseries", params={"page": 2, "pageSize": 2}, headers=_auth_header(access))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 3
+    assert body["page"] == 2
+    assert [d["id"] for d in body["data"]] == ["nur-3"]

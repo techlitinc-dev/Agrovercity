@@ -1,7 +1,9 @@
 import logging
 
+from fastapi.security import HTTPBearer
+
 import sentry_sdk
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -69,7 +71,11 @@ if settings.sentry_dsn:
         environment=settings.env,
     )
 
-app = FastAPI(title="AGROVERCITY API", version="0.1.0")
+# passive bearer scheme so Swagger UI shows the Authorize button;
+# actual auth still happens per-route in core/deps.py
+bearer_scheme = HTTPBearer(auto_error=False, description="Backend access token (or Firebase ID token for /v1/admin/*), without the 'Bearer ' prefix")
+
+app = FastAPI(title="AGROVERCITY API", version="0.1.0", dependencies=[Depends(bearer_scheme)])
 app.include_router(health.router, prefix="/v1")
 app.include_router(app_config.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")

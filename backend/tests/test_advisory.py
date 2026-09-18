@@ -148,3 +148,18 @@ async def test_intent_feeds_saturation_count(client, fake_firebase, fake_users, 
         headers=_auth_header(access),
     )
     assert resp.json()["sowingCount"] >= 1
+
+
+async def test_pest_radar_alerts(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users)
+    resp = await client.get(
+        "/v1/advisory/pest-radar",
+        params={"lat": 20.0, "lng": 73.8, "radiusKm": 5},
+        headers=_auth_header(access),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    assert body["data"][0]["disease"] == "Pink bollworm"
+    assert body["data"][0]["riskLevel"] == "yellow"
+    assert all(a["riskLevel"] in {"green", "yellow", "red"} for a in body["data"])

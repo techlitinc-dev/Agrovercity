@@ -181,3 +181,131 @@ async def test_admin_rates_unknown_id_404(client, fake_firebase, fake_users, fak
     resp = await client.post("/v1/admin/rates/bogus/approve", headers=_admin_header("tok"))
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "RATE_NOT_FOUND"
+
+
+async def test_kyc_pending_verify_reject(client, fake_firebase, fake_users, fake_db, fake_verify):
+    fake_db["vehicles"]["veh-1"] = {"id": "veh-1", "docStatus": "pending", "ownerId": "uid-5", "registrationNo": "MH15AB1234"}
+    fake_db["equipment"]["eq-1"] = {"id": "eq-1", "docStatus": "pending", "ownerId": "uid-6", "name": "Tractor 35HP"}
+
+    resp = await client.get("/v1/admin/kyc/pending", headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    kinds = {r["entityKind"] for r in body["data"]}
+    assert kinds == {"vehicle", "equipment"}
+
+    resp = await client.post("/v1/admin/kyc/veh-1/verify", headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    assert fake_db["vehicles"]["veh-1"]["docStatus"] == "verified"
+    assert "verifiedAt" in fake_db["vehicles"]["veh-1"]
+
+    resp = await client.post("/v1/admin/kyc/eq-1/reject", json={"reason": "RC मेल नहीं खाती"}, headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    assert fake_db["equipment"]["eq-1"]["docStatus"] == "rejected"
+    assert fake_db["equipment"]["eq-1"]["rejectionReason"] == "RC मेल नहीं खाती"
+
+    resp = await client.post("/v1/admin/kyc/unknown-id/verify", headers=_admin_header("tok"))
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "KYC_ENTITY_NOT_FOUND"
+
+
+async def test_broadcast_dry_run_and_segmented_send(client, fake_firebase, fake_users, fake_db, fake_verify, monkeypatch):
+    fake_db["users"]["u1"] = {"id": "u1", "linkedProfiles": ["farmer"], "district": "Nashik"}
+    fake_db["users"]["u2"] = {"id": "u2", "linkedProfiles": ["seller"], "district": "Nashik"}
+    fake_db["users"]["u3"] = {"id": "u3", "linkedProfiles": ["farmer"], "district": "Pune"}
+
+    from app.services import fcm as fcm_mod
+
+    sent_to = []
+
+    async def fake_send(uid, title, body, data={}):
+        sent_to.append(uid)
+        return 1
+
+    monkeypatch.setattr(fcm_mod, "send_to_user", fake_send)
+
+    resp = await client.post(
+        "/v1/admin/broadcast",
+        json={"segment": {"role": "farmer"}, "title": "मौसम चेतावनी", "body": "बारिश", "dryRun": True},
+        headers=_admin_header("tok"),
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"targetedCount": 2}
+    assert sent_to == []
+
+    resp = await client.post(
+        "/v1/admin/broadcast",
+        json={"segment": {"role": "farmer", "district": "Pune"}, "title": "मौसम चेतावनी", "body": "बारिश"},
+        headers=_admin_header("tok"),
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"targetedCount": 1, "sent": 1}
+    assert sent_to == ["u3"]
+
+    resp = await client.post("/v1/admin/broadcast", json={"title": "t"}, headers=_admin_header("tok"))
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "SEGMENT_REQUIRED"
+
+
+async def test_admin_settlements_lifecycle(client, fake_firebase, fake_users, fake_db, fake_verify):
+    fake_db["settlements"]["s1"] = {"id": "s1", "kind": "transport", "status": "pending", "periodStart": "2026-09-01"}
+    fake_db["settlements"]["s2"] = {"id": "s2", "kind": "equipment", "status": "approved", "periodStart": "2026-09-02"}
+
+    resp = await client.get("/v1/admin/settlements", headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 2
+
+    resp = await client.get("/v1/admin/settlements", params={"status": "approved"}, headers=_admin_header("tok"))
+    assert [d["id"] for d in resp.json()["data"]] == ["s2"]
+
+    resp = await client.post("/v1/admin/settlements/s1/settle", json={"action": "approve"}, headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    assert fake_db["settlements"]["s1"]["status"] == "approved"
+
+    resp = await client.post("/v1/admin/settlements/s2/settle", json={"action": "mark_paid"}, headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    assert fake_db["settlements"]["s2"]["status"] == "paid"
+    assert "paidAt" in fake_db["settlements"]["s2"]
+
+    resp = await client.post("/v1/admin/settlements/s1/settle", json={"action": "approve"}, headers=_admin_header("tok"))
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "ILLEGAL_STATUS_TRANSITION"
+
+    resp = await client.post("/v1/admin/settlements/missing/settle", json={"action": "approve"}, headers=_admin_header("tok"))
+    assert resp.status_code == 404
+
+
+async def test_admin_reports_resolve_dismiss(client, fake_firebase, fake_users, fake_db, fake_verify):
+    fake_db["reports"]["r1"] = {"id": "r1", "reportedId": "u9", "status": "open"}
+
+    resp = await client.get("/v1/admin/reports", params={"status": "open"}, headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+    resp = await client.post(
+        "/v1/admin/reports/r1/resolve",
+        json={"action": "dismiss", "note": "असत्यापित शिकायत"},
+        headers=_admin_header("tok"),
+    )
+    assert resp.status_code == 200
+    assert fake_db["reports"]["r1"]["status"] == "resolved"
+    assert fake_db["reports"]["r1"]["resolution"] == "dismiss"
+
+    resp = await client.post("/v1/admin/reports/r1/resolve", json={"action": "bogus"}, headers=_admin_header("tok"))
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    resp = await client.post("/v1/admin/reports/missing/resolve", json={"action": "dismiss"}, headers=_admin_header("tok"))
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "REPORT_NOT_FOUND"
+
+
+async def test_admin_reports_resolve_block_blocks_user(client, fake_firebase, fake_users, fake_db, fake_verify):
+    fake_db["reports"]["r2"] = {"id": "r2", "reportedId": "u9", "status": "open"}
+    fake_db["users"]["u9"] = {"id": "u9", "status": "active"}
+
+    resp = await client.post("/v1/admin/reports/r2/resolve", json={"action": "block"}, headers=_admin_header("tok"))
+    assert resp.status_code == 200
+    assert fake_db["reports"]["r2"]["resolution"] == "block"
+    assert fake_db["users"]["u9"]["status"] == "blocked"
+    assert fake_verify["revoked"] == ["u9"]

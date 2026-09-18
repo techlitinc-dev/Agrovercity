@@ -121,3 +121,48 @@ async def test_daily_redemption_cap(client, fake_firebase, fake_users, fake_db):
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "REDEMPTION_LIMIT_REACHED"
     assert "रिडीम सीमा" in resp.json()["error"]["message"]
+
+
+async def test_rewards_endpoint_paginates(client, fake_firebase, fake_users, fake_db):
+    await seed_rewards()
+    access = await _login(client, fake_users, fake_db, coins=0)
+
+    resp = await client.get("/v1/gamification/rewards", headers=_auth_header(access))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == len(fake_db["rewards"])
+    assert body["page"] == 1
+
+    resp = await client.get(
+        "/v1/gamification/rewards",
+        params={"page": 2, "pageSize": 2},
+        headers=_auth_header(access),
+    )
+    body = resp.json()
+    assert len(body["data"]) == min(2, max(0, body["total"] - 2))
+    assert body["pageSize"] == 2
+
+
+async def test_ledger_endpoint_most_recent_first(client, fake_firebase, fake_users, fake_db):
+    await seed_rewards()
+    access = await _login(client, fake_users, fake_db, coins=600)
+    await coins_service.award_coins("uid-1", 150, "diary_batch")
+    resp = await client.post("/v1/gamification/redeem", json={"rewardId": "reward-iffco"}, headers=_auth_header(access))
+    assert resp.status_code == 200
+
+    resp = await client.get("/v1/gamification/ledger", headers=_auth_header(access))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    amounts = [e["amount"] for e in body["data"]]
+    assert amounts[0] == -300
+    assert set(amounts) == {150, -300}
+
+
+async def test_ledger_endpoint_empty(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users, fake_db, coins=0)
+    resp = await client.get("/v1/gamification/ledger", headers=_auth_header(access))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"] == []
+    assert body["total"] == 0

@@ -81,3 +81,22 @@ async def test_register_device_idempotent(client, fake_firebase, fake_users, fak
     devices = fake_db["users/uid-1/devices"]
     assert len(devices) == 1
     _ = pytest
+
+
+async def test_delete_device_204(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users, fake_db)
+    body = {"fcmToken": "tok-xyz", "platform": "android", "locale": "mr"}
+    resp = await client.post("/v1/devices", json=body, headers=_auth_header(access))
+    assert resp.status_code == 201
+    token_hash = next(iter(fake_db["users/uid-1/devices"]))
+
+    resp = await client.delete(f"/v1/devices/{token_hash}", headers=_auth_header(access))
+    assert resp.status_code == 204
+    assert fake_db["users/uid-1/devices"] == {}
+
+
+async def test_delete_device_idempotent(client, fake_firebase, fake_users, fake_db):
+    access = await _login(client, fake_users, fake_db)
+
+    resp = await client.delete("/v1/devices/nonexistent-hash", headers=_auth_header(access))
+    assert resp.status_code == 204
